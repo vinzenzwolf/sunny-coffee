@@ -6,7 +6,13 @@
  *  │  react-native-webview (full screen) │  ← MapLibre GL JS + ShadeMap SDK
  *  │                                    │
  *  │   ┌──────────────────────────┐    │
+ *  │   │  SearchBar (native)      │    │  ← top overlay
+ *  │   └──────────────────────────┘    │
+ *  │   ┌──────────────────────────┐    │
  *  │   │  TimeControls (native)   │    │  ← date picker, shadow toggle
+ *  │   └──────────────────────────┘    │
+ *  │   ┌──────────────────────────┐    │
+ *  │   │  BottomNav (native)      │    │  ← frosted glass nav bar
  *  │   └──────────────────────────┘    │
  *  │   ┌──────────┐                   │
  *  │   │ Toast    │                   │  ← error/warning overlay
@@ -16,12 +22,9 @@
  * Communication:
  *   RN  → WebView : webviewRef.injectJavaScript(script)
  *   WebView → RN  : onMessage handler (JSON payloads)
- *
- * On mount the screen sends an INIT message with the ShadeMap API key from
- * process.env.EXPO_PUBLIC_SHADEMAP_API_KEY.  If the key is absent the WebView
- * shows a warning toast and the map still works (no shadow overlay).
  */
 
+import * as Location from 'expo-location';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Platform,
@@ -33,9 +36,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import WebView, { WebViewMessageEvent } from 'react-native-webview';
+import { Ionicons } from '@expo/vector-icons';
 
 import { MAP_HTML } from '../constants/map-html';
-import { getSunPosition, describeSunPosition } from '../services/sun-position';
+import { debounce } from '../utils/debounce';
 import { TimeControls } from './time-controls';
 import type { ToastMessage } from '../types';
 
@@ -43,7 +47,6 @@ import type { ToastMessage } from '../types';
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Inject a fire-and-forget JS snippet into the WebView. */
 function buildPostMessage(payload: object): string {
   return `(function(){
     var msg = ${JSON.stringify(JSON.stringify(payload))};
@@ -59,7 +62,7 @@ function uniqueId(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Types for WebView messages
+// Types
 // ---------------------------------------------------------------------------
 
 type WebViewMessage =
@@ -69,7 +72,75 @@ type WebViewMessage =
   | { type: 'ERROR'; message: string };
 
 // ---------------------------------------------------------------------------
-// Component
+// Nav items config
+// ---------------------------------------------------------------------------
+
+type NavItem = { key: string; label: string; icon: keyof typeof Ionicons.glyphMap; iconActive: keyof typeof Ionicons.glyphMap };
+
+const NAV_ITEMS: NavItem[] = [
+  { key: 'map',     label: 'Map',     icon: 'map-outline',      iconActive: 'map' },
+  { key: 'explore', label: 'Explore', icon: 'search-outline',   iconActive: 'search' },
+  { key: 'saved',   label: 'Saved',   icon: 'bookmark-outline', iconActive: 'bookmark' },
+  { key: 'profile', label: 'Profile', icon: 'person-outline',   iconActive: 'person' },
+];
+
+// ---------------------------------------------------------------------------
+// Sub-components
+// ---------------------------------------------------------------------------
+
+function SearchBar({ top, onLocateMe }: { top: number; onLocateMe?: () => void }) {
+  return (
+    <View style={[styles.searchRow, { top }]}>
+      <View style={styles.searchBar}>
+        <Ionicons name="search-outline" size={15} color="#C0BCB6" />
+        <Text style={styles.searchPlaceholder}>Search cafés…</Text>
+      </View>
+      <TouchableOpacity style={styles.locBtn} activeOpacity={0.8} onPress={onLocateMe}>
+        <Ionicons name="navigate" size={18} color="#1C1B19" />
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function BottomNav({
+  activeKey,
+  onPress,
+  bottom,
+}: {
+  activeKey: string;
+  onPress: (key: string) => void;
+  bottom: number;
+}) {
+  return (
+    <View style={[styles.bnav, { bottom }]}>
+      <View style={styles.bnavShimmer} />
+      {NAV_ITEMS.map((item) => {
+        const isActive = item.key === activeKey;
+        return (
+          <TouchableOpacity
+            key={item.key}
+            style={styles.navItem}
+            onPress={() => onPress(item.key)}
+            activeOpacity={0.7}
+          >
+            <Ionicons
+              name={isActive ? item.iconActive : item.icon}
+              size={22}
+              color={isActive ? '#1C1B19' : '#9A9690'}
+            />
+            <Text style={[styles.navLabel, isActive && styles.navLabelActive]}>
+              {item.label}
+            </Text>
+            {isActive && <View style={styles.navDot} />}
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main component
 // ---------------------------------------------------------------------------
 
 export default function MapScreen() {
@@ -78,20 +149,53 @@ export default function MapScreen() {
 
   const [mapReady, setMapReady] = useState(false);
   const [date, setDate] = useState(() => new Date());
-  const [shadowsEnabled, setShadowsEnabled] = useState(true);
+
   const [buildingCount, setBuildingCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
-  const [sunDescription, setSunDescription] = useState('');
+
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [activeNav, setActiveNav] = useState('map');
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const locationSubRef = useRef<Location.LocationSubscription | null>(null);
 
-  // Compute sun description on the RN side (for the status strip)
+  const sendDateToMap = useRef(
+    debounce((iso: string) => {
+      webviewRef.current?.injectJavaScript(
+        buildPostMessage({ type: 'SET_DATE', date: iso }),
+      );
+    }, 24),
+  ).current;
+
   useEffect(() => {
-    // Use a rough center (Copenhagen default; we don't track map center in RN)
-    const pos = getSunPosition(date, 55.6761, 12.5683);
-    setSunDescription(describeSunPosition(pos));
-  }, [date]);
+    return () => {
+      sendDateToMap.cancel();
+      locationSubRef.current?.remove();
+    };
+  }, [sendDateToMap]);
 
-  // ─── WebView → RN message handler ──────────────────────────────────────
+  // Start watching location once map is ready (only if permission was granted)
+  useEffect(() => {
+    if (!mapReady) return;
+    let sub: Location.LocationSubscription | null = null;
+    (async () => {
+      const { status } = await Location.getForegroundPermissionsAsync();
+      if (status !== 'granted') return;
+      sub = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 10 },
+        (loc) => {
+          const { latitude: lat, longitude: lng } = loc.coords;
+          setUserLocation({ lat, lng });
+          webviewRef.current?.injectJavaScript(
+            buildPostMessage({ type: 'SET_LOCATION', lat, lng }),
+          );
+        },
+      );
+      locationSubRef.current = sub;
+    })();
+    return () => { sub?.remove(); };
+  }, [mapReady]);
+
+  // ─── WebView → RN ─────────────────────────────────────────────────────
 
   const handleMessage = useCallback((event: WebViewMessageEvent) => {
     let msg: WebViewMessage;
@@ -105,7 +209,6 @@ export default function MapScreen() {
       case 'MAP_READY': {
         setMapReady(true);
         setIsLoading(false);
-        // Send INIT with ShadeMap API key
         const apiKey = process.env['EXPO_PUBLIC_SHADEMAP_API_KEY'] ?? '';
         webviewRef.current?.injectJavaScript(
           buildPostMessage({ type: 'INIT', apiKey }),
@@ -114,15 +217,6 @@ export default function MapScreen() {
       }
       case 'STATUS':
         setBuildingCount(msg.buildingCount ?? 0);
-        // Update sun description from map-center coordinates reported by WebView
-        if (msg.sunAlt !== undefined) {
-          const pos = {
-            altitudeRad: msg.sunAlt,
-            azimuthRad: msg.sunAz,
-            isAboveHorizon: msg.sunAlt > 0.017,
-          };
-          setSunDescription(describeSunPosition(pos));
-        }
         setIsLoading(false);
         break;
       case 'WARNING':
@@ -134,30 +228,36 @@ export default function MapScreen() {
     }
   }, []);
 
-  // ─── RN → WebView commands ──────────────────────────────────────────────
+  // ─── RN → WebView ─────────────────────────────────────────────────────
 
   const handleDateChange = useCallback(
     (newDate: Date) => {
       setDate(newDate);
-      setIsLoading(true);
-      webviewRef.current?.injectJavaScript(
-        buildPostMessage({ type: 'SET_DATE', date: newDate.toISOString() }),
-      );
+      sendDateToMap(newDate.toISOString());
     },
-    [],
+    [sendDateToMap],
   );
 
-  const handleToggleShadows = useCallback(() => {
-    setShadowsEnabled((prev) => {
-      const next = !prev;
-      webviewRef.current?.injectJavaScript(
-        buildPostMessage({ type: 'SET_SHADOWS', enabled: next }),
-      );
-      return next;
-    });
+  const handleScrubStart = useCallback(() => {
+    webviewRef.current?.injectJavaScript(
+      buildPostMessage({ type: 'SCRUB_START' }),
+    );
   }, []);
 
-  // ─── Toast helpers ───────────────────────────────────────────────────────
+  const handleLocateMe = useCallback(() => {
+    if (!userLocation) return;
+    webviewRef.current?.injectJavaScript(
+      buildPostMessage({ type: 'FLY_TO', lat: userLocation.lat, lng: userLocation.lng }),
+    );
+  }, [userLocation]);
+
+  const handleScrubEnd = useCallback(() => {
+    webviewRef.current?.injectJavaScript(
+      buildPostMessage({ type: 'SCRUB_END' }),
+    );
+  }, []);
+
+  // ─── Toasts ───────────────────────────────────────────────────────────
 
   function pushToast(level: ToastMessage['level'], message: string): void {
     const id = uniqueId();
@@ -167,25 +267,31 @@ export default function MapScreen() {
     }, 4_000);
   }
 
-  // ─── Render ──────────────────────────────────────────────────────────────
+  // ─── Layout values ────────────────────────────────────────────────────
+
+  // Search bar sits just below the status bar / dynamic island area
+  const searchBarTop = insets.top + 12;
+  // Nav bar: 20px from screen edge, matching side margins
+  const navBottom = 20;
+  // Slider card sits 12px above the top of the nav bar (nav height = 76)
+  const cardBottom = navBottom + 76 + 12;
+
+  // ─── Render ───────────────────────────────────────────────────────────
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
 
-      {/* Full-screen WebView: MapLibre GL JS + mapbox-gl-shadow-simulator */}
+      {/* Full-screen WebView */}
       <WebView
         ref={webviewRef}
         style={styles.webview}
-        // baseUrl gives the page a real origin so CDN scripts load without CORS issues
         source={{ html: MAP_HTML, baseUrl: 'https://example.com' }}
         originWhitelist={['*']}
         javaScriptEnabled
         domStorageEnabled
-        // Allow mixed HTTP/HTTPS content (OSM tiles are plain HTTP in some regions)
         mixedContentMode="always"
         allowsInlineMediaPlayback
-        // Disable scroll so the map's touch gestures work cleanly
         scrollEnabled={false}
         bounces={false}
         onMessage={handleMessage}
@@ -193,9 +299,12 @@ export default function MapScreen() {
         onError={(e) => pushToast('error', `WebView: ${e.nativeEvent.description}`)}
       />
 
-      {/* Toast messages (above the controls) */}
+      {/* Search bar */}
+      <SearchBar top={searchBarTop} onLocateMe={handleLocateMe} />
+
+      {/* Toast messages */}
       {toasts.length > 0 && (
-        <View style={[styles.toastContainer, { top: insets.top + 12 }]}>
+        <View style={[styles.toastContainer, { top: searchBarTop + 56 }]}>
           {toasts.map((t) => (
             <TouchableOpacity
               key={t.id}
@@ -209,15 +318,22 @@ export default function MapScreen() {
         </View>
       )}
 
-      {/* Native time / shadow controls overlaid at the bottom */}
+      {/* Time / shadow controls */}
       <TimeControls
         date={date}
-        shadowsEnabled={shadowsEnabled}
-        sunDescription={sunDescription}
         buildingCount={buildingCount}
         isLoading={isLoading || !mapReady}
+        bottom={cardBottom}
         onDateChange={handleDateChange}
-        onToggleShadows={handleToggleShadows}
+        onScrubStart={handleScrubStart}
+        onScrubEnd={handleScrubEnd}
+      />
+
+      {/* Bottom navigation */}
+      <BottomNav
+        activeKey={activeNav}
+        onPress={setActiveNav}
+        bottom={navBottom}
       />
     </View>
   );
@@ -230,46 +346,157 @@ export default function MapScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f0ebe3',
+    backgroundColor: '#E8E3D8',
   },
   webview: {
     flex: 1,
   },
+
+  // Search bar
+  searchRow: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'center',
+    zIndex: 15,
+  },
+  searchBar: {
+    flex: 1,
+    height: 44,
+    backgroundColor: '#fff',
+    borderRadius: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    gap: 8,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 12,
+      },
+      android: { elevation: 3 },
+    }),
+  },
+  searchPlaceholder: {
+    flex: 1,
+    fontSize: 13,
+    color: '#C8C4BF',
+    fontWeight: '400',
+  },
+  locBtn: {
+    width: 44,
+    height: 44,
+    backgroundColor: '#fff',
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 12,
+      },
+      android: { elevation: 3 },
+    }),
+  },
+
+  // Bottom nav
+  bnav: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    height: 76,
+    backgroundColor: 'rgba(255,255,255,0.72)',
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.45)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    paddingTop: 4,
+    zIndex: 10,
+    overflow: 'hidden',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.09,
+        shadowRadius: 20,
+      },
+      android: { elevation: 8 },
+    }),
+  },
+  bnavShimmer: {
+    position: 'absolute',
+    top: 0,
+    left: '10%',
+    right: '10%',
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+  },
+  navItem: {
+    alignItems: 'center',
+    gap: 3,
+    minWidth: 60,
+    position: 'relative',
+  },
+  navLabel: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: 'rgba(60,60,67,0.6)',
+  },
+  navLabelActive: {
+    fontWeight: '700',
+    color: '#1C1B19',
+  },
+  navDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#F5A623',
+  },
+
   // Toasts
   toastContainer: {
     position: 'absolute',
-    left: 12,
-    right: 12,
+    left: 20,
+    right: 20,
     gap: 6,
     zIndex: 20,
   },
   toast: {
-    borderRadius: 10,
+    borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 10,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.2,
-        shadowRadius: 6,
+        shadowOpacity: 0.12,
+        shadowRadius: 8,
       },
       android: { elevation: 4 },
     }),
   },
   toastWarning: {
-    backgroundColor: '#FFF3CD',
-    borderLeftWidth: 4,
-    borderLeftColor: '#FF8F00',
+    backgroundColor: '#FFF8EC',
+    borderLeftWidth: 3,
+    borderLeftColor: '#F5A623',
   },
   toastError: {
     backgroundColor: '#FFEBEE',
-    borderLeftWidth: 4,
+    borderLeftWidth: 3,
     borderLeftColor: '#C62828',
   },
   toastText: {
     fontSize: 13,
-    color: '#333',
+    color: '#1C1B19',
     lineHeight: 18,
   },
 });

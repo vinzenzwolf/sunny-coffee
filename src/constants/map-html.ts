@@ -1,13 +1,14 @@
 /**
  * Self-contained WebView HTML page.
  *
- * Shadow rendering (client-side canvas):
- *   All shadow polygons are drawn as solid opaque fills onto a transparent
- *   <canvas> overlay, then CSS `opacity` is applied to the WHOLE canvas.
- *   → overlapping shadows never accumulate; the entire canvas is blended once.
+ * Shadow rendering (on-device vector layer):
+ *   Shadow polygons are computed on-device in JS and pushed to a GeoJSON
+ *   source. MapLibre then renders them as a GPU `fill` layer.
+ *   → avoids per-frame canvas redraws and keeps rendering on WebGL.
  *
  * Map:      OpenFreeMap liberty (free vector tiles, building heights included)
- * Buildings: map.queryRenderedFeatures() – same geometry the user sees, instant
+ * Buildings: map.queryRenderedFeatures() over a padded screen bbox so nearby
+ *            off-screen buildings are included for smoother shadow continuity.
  *
  * RN ↔ WebView bridge
  *  RN → WebView  { type:'INIT'|'SET_DATE'|'SET_SHADOWS', ... }
@@ -33,29 +34,24 @@ export const MAP_HTML = `<!DOCTYPE html>
     html, body, #map { width:100%; height:100%; overflow:hidden; }
     .maplibregl-ctrl-bottom-left,
     .maplibregl-ctrl-bottom-right { display:none; }
-
-    /*
-     * Shadow canvas overlay.
-     * CSS opacity is applied to the ENTIRE canvas as one compositing step,
-     * so pixels covered by multiple overlapping shadow polygons are NOT darker
-     * – they are still just opaque black on the canvas, blended once at 0.38.
-     */
-    #shadow-canvas {
+    #night-overlay {
       position: absolute;
-      top: 0; left: 0;
+      inset: 0;
+      background: #3a3a3a;
+      opacity: 0;
       pointer-events: none;
-      opacity: 0.38;
-      transition: opacity 0.2s ease;
+      transition: opacity 0.12s linear;
     }
+
   </style>
 </head>
 <body>
   <div id="map"></div>
-  <!-- Shadow overlay: drawn as solid black then composited at CSS opacity -->
-  <canvas id="shadow-canvas"></canvas>
+  <div id="night-overlay"></div>
 
   <script src="https://unpkg.com/maplibre-gl@${MAPLIBRE_VER}/dist/maplibre-gl.js"></script>
   <script src="https://unpkg.com/suncalc@${SUNCALC_VER}/suncalc.js"></script>
+  <script src="https://unpkg.com/polygon-clipping@0.15.7/dist/polygon-clipping.umd.min.js"></script>
 
 <script>
 (function () {
@@ -65,15 +61,34 @@ export const MAP_HTML = `<!DOCTYPE html>
   var DEFAULT_CENTER  = [12.5683, 55.6761];
   var DEFAULT_ZOOM    = 15;
   var MAX_SHADOW_M    = 400;
-  var SHADOW_OPACITY  = 0.38;
+  var MIN_SUN_ALT_RAD = 0.017;
+  var SHADOW_QUERY_PAD_FACTOR = 1.75; // 1.0 = viewport only, 1.75 = include surroundings
+  // Uniform semitransparent shadows require dissolved geometry
+  // (otherwise overlap regions get darker due to alpha stacking).
+  var SHADOW_OPACITY  = 0.42;
+  var SHADOW_COLOR    = '#4f5f7d';
+  var SHADOW_SOURCE_ID = 'client-shadows';
+  var SHADOW_LAYER_ID  = 'client-shadows-fill';
+  var NIGHT_OVERLAY_OPACITY = 0.55;
+  var MAX_DISSOLVE_FEATURES = 2000;
+  var DISSOLVE_MIN_ZOOM = 16.2;
+  var SHADOW_OPACITY_FAST = 0.30;
+  var MAX_SHADOW_RING_POINTS = 28;
+  var MAX_SHADOW_RING_POINTS_SCRUB = 12;
+  var MAX_SHADOW_FEATURES_SCRUB = 700;
+  var SCRUB_UPDATE_INTERVAL_MS = 70;
 
   /* ── state ──────────────────────────────────────────────────────────────── */
   var currentDate      = new Date();
   var shadowsEnabled   = true;
-  var rafPending       = false;
   var buildingLayerIds = [];   // filled on 'load' from the style's actual layer IDs
   var mapLoaded        = false;
-  var cachedBuildings  = [];   // refreshed on idle, reused every render frame
+  var shadowUpdateTimer = null;
+  var lastShadowKey = '';
+  var shadowUpdateInFlight = false;
+  var shadowUpdateQueued = false;
+  var isScrubbing = false;
+  var nightOverlay = document.getElementById('night-overlay');
 
   /* ── Inline sun position (fallback when SunCalc CDN fails) ─────────────── */
   function calcSunPos(date, latDeg, lonDeg) {
@@ -107,23 +122,6 @@ export const MAP_HTML = `<!DOCTYPE html>
     return calcSunPos(date, latDeg, lonDeg);
   }
 
-  /* ── canvas overlay elements ────────────────────────────────────────────── */
-  var shadowCanvas = document.getElementById('shadow-canvas');
-  var ctx          = shadowCanvas.getContext('2d');
-
-  /** Resize the canvas to match the map container (CSS pixel dimensions). */
-  function syncCanvasSize() {
-    var c = map.getContainer();
-    var w = c.clientWidth;
-    var h = c.clientHeight;
-    if (shadowCanvas.width !== w || shadowCanvas.height !== h) {
-      shadowCanvas.width  = w;
-      shadowCanvas.height = h;
-      shadowCanvas.style.width  = w + 'px';
-      shadowCanvas.style.height = h + 'px';
-    }
-  }
-
   /* ── RN bridge ──────────────────────────────────────────────────────────── */
   function postToRN(obj) {
     try {
@@ -133,13 +131,50 @@ export const MAP_HTML = `<!DOCTYPE html>
   }
 
   /* ── Building data from rendered features (instant, same as what's visible) */
+  function getPaddedQueryBox() {
+    var c = map.getContainer();
+    var w = c.clientWidth;
+    var h = c.clientHeight;
+    var padX = ((SHADOW_QUERY_PAD_FACTOR - 1) * w) / 2;
+    var padY = ((SHADOW_QUERY_PAD_FACTOR - 1) * h) / 2;
+    // Pixel-space query box relative to map container top-left.
+    return [[-padX, -padY], [w + padX, h + padY]];
+  }
+
   function queryBuildings() {
+    function ringBoundsKey(ring) {
+      var minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
+      for (var i = 0; i < ring.length; i++) {
+        var p = ring[i];
+        if (!p || typeof p[0] !== 'number' || typeof p[1] !== 'number') continue;
+        if (p[0] < minLon) minLon = p[0];
+        if (p[1] < minLat) minLat = p[1];
+        if (p[0] > maxLon) maxLon = p[0];
+        if (p[1] > maxLat) maxLat = p[1];
+      }
+      if (!isFinite(minLon) || !isFinite(minLat) || !isFinite(maxLon) || !isFinite(maxLat)) {
+        return null;
+      }
+      return [
+        minLon.toFixed(6),
+        minLat.toFixed(6),
+        maxLon.toFixed(6),
+        maxLat.toFixed(6),
+        ring.length
+      ].join(',');
+    }
+
     var raw;
     try {
       /* Use the layer IDs discovered from the style at load time so we never
          depend on hardcoded names that differ between map styles. */
       var opts = buildingLayerIds.length ? { layers: buildingLayerIds } : {};
-      raw = map.queryRenderedFeatures(undefined, opts);
+      raw = map.queryRenderedFeatures(getPaddedQueryBox(), opts);
+      // Some MapLibre builds only return rendered features inside the viewport
+      // and may yield an empty result for off-screen query boxes.
+      if (!raw.length) {
+        raw = map.queryRenderedFeatures(undefined, opts);
+      }
       /* If no layer filter was possible, keep only features from source-layer 'building'. */
       if (!buildingLayerIds.length) {
         raw = raw.filter(function (f) { return f.sourceLayer === 'building'; });
@@ -172,7 +207,14 @@ export const MAP_HTML = `<!DOCTYPE html>
         var firstPt = outerRing[0];
         if (!firstPt || typeof firstPt[0] !== 'number') return;
 
-        var key = firstPt[0].toFixed(6) + ',' + firstPt[1].toFixed(6);
+        // Primary dedupe key: stable vector-tile feature id across fill/fill-extrusion layers.
+        var idKey =
+          f.id !== undefined && f.id !== null
+            ? String(f.source || '') + ':' + String(f.sourceLayer || '') + ':' + String(f.id)
+            : null;
+        // Fallback dedupe key for sources without feature ids.
+        var geomKey = ringBoundsKey(outerRing);
+        var key = idKey || geomKey || (firstPt[0].toFixed(6) + ',' + firstPt[1].toFixed(6));
         if (seen[key]) return;
         seen[key] = true;
 
@@ -206,39 +248,63 @@ export const MAP_HTML = `<!DOCTYPE html>
     return h;
   }
 
-  /* ── Canvas shadow rendering ─────────────────────────────────────────────── */
+  function simplifyClosedRing(ring, maxPoints) {
+    if (!ring || ring.length < 5) return ring;
+    var open = ring.slice(0, -1);
+    if (open.length <= maxPoints) return ring;
+    var step = Math.ceil(open.length / maxPoints);
+    var sampled = [];
+    for (var i = 0; i < open.length; i += step) {
+      sampled.push(open[i]);
+    }
+    if (sampled.length < 3) return ring;
+    sampled.push(sampled[0]);
+    return sampled;
+  }
 
-  /**
-   * Redraws the shadow canvas for the current viewport, date, and buildings.
-   *
-   * Key design: all shadow polygons are filled as SOLID opaque paths on the
-   * canvas.  CSS opacity:0.38 on the canvas element composites the result
-   * once.  Overlapping areas (same solid black on canvas) never become darker.
-   */
-  function drawClientShadows() {
-    syncCanvasSize();
-    ctx.clearRect(0, 0, shadowCanvas.width, shadowCanvas.height);
+  function emptyShadowCollection() {
+    return { type: 'FeatureCollection', features: [] };
+  }
 
-    var buildings = queryBuildings();
-    sendStatus(buildings.features.length);
+  function ensureShadowLayer() {
+    if (!map.getSource(SHADOW_SOURCE_ID)) {
+      map.addSource(SHADOW_SOURCE_ID, {
+        type: 'geojson',
+        data: emptyShadowCollection(),
+      });
+    }
+    if (!map.getLayer(SHADOW_LAYER_ID)) {
+      var beforeLayerId = buildingLayerIds.length ? buildingLayerIds[0] : undefined;
+      map.addLayer({
+        id: SHADOW_LAYER_ID,
+        type: 'fill',
+        source: SHADOW_SOURCE_ID,
+        paint: {
+          'fill-color': SHADOW_COLOR,
+          'fill-opacity': shadowsEnabled ? SHADOW_OPACITY : 0,
+        },
+      }, beforeLayerId);
+    }
+  }
 
-    if (!shadowsEnabled) return;
+  function computeShadowGeoJSON(buildings, sun, refLatDeg, options) {
+    var opts = options || {};
+    var maxPoints = opts.maxPoints || MAX_SHADOW_RING_POINTS;
+    var maxFeatures = opts.maxFeatures || Infinity;
 
-    var center = map.getCenter();
-    var sun = getSunPos(currentDate, center.lat, center.lng);
-    if (sun.altitude < 0.017) return;   // sun below horizon
+    if (!shadowsEnabled || sun.altitude < MIN_SUN_ALT_RAD) return emptyShadowCollection();
 
-    var spM    = Math.min(1 / Math.tan(sun.altitude), MAX_SHADOW_M);
+    var features = [];
+    var spM = Math.min(1 / Math.tan(sun.altitude), MAX_SHADOW_M);
     var northAz = sun.azimuth + Math.PI;
-    var sdLonU  = -Math.sin(northAz);
-    var sdLatU  = -Math.cos(northAz);
-    var cosLat  = Math.cos(center.lat * Math.PI / 180);
+    var sdLonU = -Math.sin(northAz);
+    var sdLatU = -Math.cos(northAz);
+    var cosLat = Math.max(Math.cos(refLatDeg * Math.PI / 180), 0.01);
 
-    ctx.fillStyle = '#01112f';    // matches ShadeMap SDK default color
-    ctx.beginPath();              // single path for ALL shadows → one fill call
-
-    buildings.features.forEach(function (f) {
-      var h    = (f.properties && f.properties.height) || 9.0;
+    for (var fi = 0; fi < buildings.features.length; fi++) {
+      if (features.length >= maxFeatures) break;
+      var f = buildings.features[fi];
+      var h = (f.properties && f.properties.height) || 9.0;
       var lenM = h * spM;
       var dLon = sdLonU * lenM / (111320 * cosLat);
       var dLat = sdLatU * lenM / 111320;
@@ -247,46 +313,180 @@ export const MAP_HTML = `<!DOCTYPE html>
         ? [f.geometry.coordinates[0]]
         : f.geometry.coordinates.map(function (p) { return p[0]; });
 
-      geoRings.forEach(function (geoRing) {
-        var open = (geoRing[0][0] === geoRing[geoRing.length-1][0] &&
-                    geoRing[0][1] === geoRing[geoRing.length-1][1])
-          ? geoRing.slice(0, -1) : geoRing;
+      for (var gi = 0; gi < geoRings.length; gi++) {
+        if (features.length >= maxFeatures) break;
+        var geoRing = geoRings[gi];
+        var open = (geoRing[0][0] === geoRing[geoRing.length - 1][0] &&
+                    geoRing[0][1] === geoRing[geoRing.length - 1][1])
+          ? geoRing.slice(0, -1)
+          : geoRing;
         if (open.length < 3) return;
 
-        var proj = open.map(function (p) { return [p[0]+dLon, p[1]+dLat]; });
+        var proj = open.map(function (p) { return [p[0] + dLon, p[1] + dLat]; });
         var hull = convexHull(open.concat(proj));
         if (hull.length < 4) return;
 
-        /*
-         * Add the shadow polygon as a sub-path. Using ctx.fill() with the
-         * 'evenodd' fill rule later ensures that any area inside an even
-         * number of sub-paths is NOT filled – but since our sub-paths don't
-         * overlap in most cases, 'nonzero' (default) is fine and fills all.
-         * The key is that ALL paths are filled in a SINGLE ctx.fill() call,
-         * so the 2D canvas compositing model fills each pixel AT MOST once
-         * before the CSS opacity is applied.
-         */
-        var pt0 = map.project(hull[0]);
-        ctx.moveTo(pt0.x, pt0.y);
-        for (var i = 1; i < hull.length - 1; i++) {
-          var pt = map.project(hull[i]);
-          ctx.lineTo(pt.x, pt.y);
-        }
-        ctx.closePath();
-      });
-    });
+        var simpleHull = simplifyClosedRing(hull, maxPoints);
+        features.push({
+          type: 'Feature',
+          geometry: { type: 'Polygon', coordinates: [simpleHull] },
+          properties: { height: h },
+        });
+      }
+    }
 
-    ctx.fill();   // one composite fill call → no per-polygon alpha accumulation
+    return { type: 'FeatureCollection', features: features };
   }
 
-  /** Schedule a shadow redraw on the next animation frame (throttles rapid events). */
-  function scheduleDraw() {
-    if (!mapLoaded || rafPending) return;
-    rafPending = true;
-    requestAnimationFrame(function () {
-      rafPending = false;
-      drawClientShadows();
-    });
+  function dissolveShadows(shadowFC) {
+    if (!shadowFC.features.length) return shadowFC;
+    if (shadowFC.features.length > MAX_DISSOLVE_FEATURES) {
+      return shadowFC;
+    }
+    if (!window.polygonClipping || typeof window.polygonClipping.union !== 'function') {
+      return shadowFC;
+    }
+
+    function isPos(p) {
+      return Array.isArray(p) && p.length >= 2 &&
+        typeof p[0] === 'number' && typeof p[1] === 'number';
+    }
+    function isRing(r) {
+      return Array.isArray(r) && r.length >= 4 && isPos(r[0]);
+    }
+    function isPolygonCoords(c) {
+      return Array.isArray(c) && c.length > 0 && isRing(c[0]);
+    }
+    function isMultiPolygonCoords(c) {
+      return Array.isArray(c) && c.length > 0 && isPolygonCoords(c[0]);
+    }
+    function toMultiPolygonCoords(c) {
+      if (isMultiPolygonCoords(c)) return c;
+      if (isPolygonCoords(c)) return [c];
+      return null;
+    }
+
+    try {
+      var polys = [];
+      for (var i = 0; i < shadowFC.features.length; i++) {
+        var coords = shadowFC.features[i].geometry.coordinates;
+        var mp = toMultiPolygonCoords(coords);
+        if (mp) polys.push(mp);
+      }
+      if (!polys.length) return emptyShadowCollection();
+
+      // Pairwise reduction is more stable than a long sequential union chain.
+      var queue = polys.slice();
+      while (queue.length > 1) {
+        var next = [];
+        for (var j = 0; j < queue.length; j += 2) {
+          if (j + 1 < queue.length) {
+            next.push(window.polygonClipping.union(queue[j], queue[j + 1]));
+          } else {
+            next.push(queue[j]);
+          }
+        }
+        queue = next;
+      }
+      var merged = queue[0];
+
+      var mergedMulti = toMultiPolygonCoords(merged);
+      if (!mergedMulti || !mergedMulti.length) return emptyShadowCollection();
+
+      return {
+        type: 'FeatureCollection',
+        // One dissolved geometry -> one alpha application across the final shadow surface.
+        features: [{
+          type: 'Feature',
+          geometry: { type: 'MultiPolygon', coordinates: mergedMulti },
+          properties: {},
+        }],
+      };
+    } catch (_) {
+      return shadowFC;
+    }
+  }
+
+  function updateShadows() {
+    if (!mapLoaded) return;
+    if (shadowUpdateInFlight) {
+      shadowUpdateQueued = true;
+      return;
+    }
+    shadowUpdateInFlight = true;
+    try {
+      ensureShadowLayer();
+
+      var buildings = queryBuildings();
+      var center = map.getCenter();
+      var sun = getSunPos(currentDate, center.lat, center.lng);
+      var zoom = map.getZoom();
+      var shadowKey = [
+        center.lng.toFixed(4),
+        center.lat.toFixed(4),
+        zoom.toFixed(2),
+        map.getBearing().toFixed(1),
+        Math.floor(currentDate.getTime() / 60_000),
+        buildings.features.length,
+        isScrubbing ? 1 : 0,
+        shadowsEnabled ? 1 : 0,
+      ].join('|');
+
+      if (shadowKey === lastShadowKey) {
+        sendStatus(buildings.features.length);
+        return;
+      }
+      lastShadowKey = shadowKey;
+
+      var rawShadowData = computeShadowGeoJSON(
+        buildings,
+        sun,
+        center.lat,
+        isScrubbing
+          ? { maxPoints: MAX_SHADOW_RING_POINTS_SCRUB, maxFeatures: MAX_SHADOW_FEATURES_SCRUB }
+          : undefined,
+      );
+      var useDissolve =
+        !isScrubbing &&
+        zoom >= DISSOLVE_MIN_ZOOM &&
+        rawShadowData.features.length > 0 &&
+        rawShadowData.features.length <= MAX_DISSOLVE_FEATURES;
+
+      var shadowData = useDissolve ? dissolveShadows(rawShadowData) : rawShadowData;
+      var src = map.getSource(SHADOW_SOURCE_ID);
+      if (src) src.setData(shadowData);
+      if (nightOverlay) {
+        var isNight = sun.altitude < MIN_SUN_ALT_RAD;
+        nightOverlay.style.opacity =
+          shadowsEnabled && isNight ? String(NIGHT_OVERLAY_OPACITY) : '0';
+      }
+      if (map.getLayer(SHADOW_LAYER_ID)) {
+        map.setPaintProperty(
+          SHADOW_LAYER_ID,
+          'fill-opacity',
+          shadowsEnabled ? (useDissolve ? SHADOW_OPACITY : SHADOW_OPACITY_FAST) : 0
+        );
+      }
+
+      sendStatus(buildings.features.length);
+    } catch (e) {
+      postToRN({ type: 'ERROR', message: 'Shadow update failed' });
+    } finally {
+      shadowUpdateInFlight = false;
+      if (shadowUpdateQueued) {
+        shadowUpdateQueued = false;
+        scheduleShadowUpdate(0);
+      }
+    }
+  }
+
+  function scheduleShadowUpdate(delayMs) {
+    if (!mapLoaded) return;
+    if (shadowUpdateTimer) clearTimeout(shadowUpdateTimer);
+    shadowUpdateTimer = setTimeout(function () {
+      shadowUpdateTimer = null;
+      updateShadows();
+    }, delayMs || 0);
   }
 
   function sendStatus(buildingCount) {
@@ -307,12 +507,28 @@ export const MAP_HTML = `<!DOCTYPE html>
     style:      '${OFMAP_STYLE}',
     center:     DEFAULT_CENTER,
     zoom:       DEFAULT_ZOOM,
+    interactive: true,
+    dragPan:    true,
+    dragRotate: true,
+    touchZoomRotate: true,
+    scrollZoom: true,
+    boxZoom: true,
+    doubleClickZoom: true,
+    keyboard: false,
+    pitch:      0,
+    maxPitch:   0,
     maxZoom:    18,
-    minZoom:    10,
+    minZoom:    14,
     attributionControl: false,
   });
 
   map.on('load', function () {
+    // Interaction profile: pan + rotate + zoom allowed, pitch disabled.
+    try { map.dragPan.enable(); } catch (_) {}
+    try { map.keyboard.disable(); } catch (_) {}
+    try { map.dragRotate.enable(); } catch (_) {}
+    try { map.touchZoomRotate.enable(); map.touchZoomRotate.enableRotation(); } catch (_) {}
+
     var layers = map.getStyle().layers;
 
     /* Collect layer IDs whose source-layer is 'building' (fill / fill-extrusion). */
@@ -322,6 +538,19 @@ export const MAP_HTML = `<!DOCTYPE html>
                (l.type === 'fill' || l.type === 'fill-extrusion');
       })
       .map(function (l) { return l.id; });
+
+    // Buildings should be fully opaque.
+    buildingLayerIds.forEach(function (id) {
+      try {
+        var layer = map.getLayer(id);
+        if (!layer) return;
+        if (layer.type === 'fill-extrusion') {
+          map.setPaintProperty(id, 'fill-extrusion-opacity', 1);
+        } else if (layer.type === 'fill') {
+          map.setPaintProperty(id, 'fill-opacity', 1);
+        }
+      } catch (_) {}
+    });
 
     /* Strip all symbol layers (labels + POI icons) and shaded-relief raster. */
     var toRemove = layers
@@ -333,13 +562,32 @@ export const MAP_HTML = `<!DOCTYPE html>
       try { map.removeLayer(id); } catch (_) {}
     });
 
+    ensureShadowLayer();
+
+    // User location dot
+    map.addSource('user-location', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] }
+    });
+    map.addLayer({
+      id: 'user-location-dot',
+      type: 'circle',
+      source: 'user-location',
+      paint: {
+        'circle-radius': 9,
+        'circle-color': '#007AFF',
+        'circle-stroke-width': 3,
+        'circle-stroke-color': '#fff',
+        'circle-stroke-opacity': 1,
+      }
+    });
+
     mapLoaded = true;
-    setTimeout(scheduleDraw, 500);   // initial draw once tiles have had time to load
+    setTimeout(function () { scheduleShadowUpdate(0); }, 250);
     postToRN({ type: 'MAP_READY' });
   });
 
-  /* scheduleDraw is rAF-throttled – safe to call on every render frame. */
-  map.on('render', scheduleDraw);
+  map.on('moveend', function () { scheduleShadowUpdate(90); });
 
   /* ── Message bridge: RN → WebView ────────────────────────────────────────── */
 
@@ -355,13 +603,52 @@ export const MAP_HTML = `<!DOCTYPE html>
 
         case 'SET_DATE':
           currentDate = new Date(msg.date);
-          scheduleDraw();
+          scheduleShadowUpdate(isScrubbing ? SCRUB_UPDATE_INTERVAL_MS : 0);
           break;
 
         case 'SET_SHADOWS':
           shadowsEnabled = msg.enabled;
-          shadowCanvas.style.opacity = shadowsEnabled ? String(SHADOW_OPACITY) : '0';
-          scheduleDraw();
+          if (map.getLayer(SHADOW_LAYER_ID)) {
+            map.setPaintProperty(
+              SHADOW_LAYER_ID,
+              'fill-opacity',
+              shadowsEnabled ? SHADOW_OPACITY : 0
+            );
+          }
+          scheduleShadowUpdate(0);
+          break;
+
+        case 'SCRUB_START':
+          isScrubbing = true;
+          scheduleShadowUpdate(0);
+          break;
+
+        case 'SCRUB_END':
+          isScrubbing = false;
+          scheduleShadowUpdate(0);
+          break;
+
+        case 'SET_LOCATION': {
+          var locSrc = map.getSource('user-location');
+          if (locSrc && typeof msg.lat === 'number' && typeof msg.lng === 'number') {
+            locSrc.setData({
+              type: 'FeatureCollection',
+              features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [msg.lng, msg.lat] }, properties: {} }]
+            });
+          }
+          break;
+        }
+
+        case 'FLY_TO':
+          if (typeof msg.lat === 'number' && typeof msg.lng === 'number') {
+            map.flyTo({ center: [msg.lng, msg.lat], zoom: 15, duration: 1200 });
+          }
+          break;
+
+        case 'JUMP_TO':
+          if (typeof msg.lat === 'number' && typeof msg.lng === 'number') {
+            map.jumpTo({ center: [msg.lng, msg.lat] });
+          }
           break;
       }
     } catch (_) {}

@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sunny Coffee — Venue Profile</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #E9E6E2;
+    font-family: 'DM Sans', sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 40px 20px;
+  }
+
+  .phone {
+    width: 393px;
+    height: 852px;
+    background: #F5F3F0;
+    border-radius: 54px;
+    box-shadow: 0 40px 120px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06), inset 0 0 0 1px rgba(255,255,255,0.8);
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Status bar */
+  .status-bar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 32px 0;
+    font-size: 15px;
+    font-weight: 500;
+    color: #1C1B19;
+    z-index: 20;
+  }
+  .status-icons { display: flex; gap: 6px; align-items: center; }
+
+  .dynamic-island {
+    position: absolute;
+    top: 10px; left: 50%;
+    transform: translateX(-50%);
+    width: 120px; height: 34px;
+    background: #1C1B19;
+    border-radius: 20px;
+    z-index: 20;
+  }
+
+  /* Hero */
+  .hero {
+    width: 100%;
+    height: 280px;
+    position: relative;
+    flex-shrink: 0;
+    overflow: hidden;
+    background: linear-gradient(160deg, #FDF3E3 0%, #F5D89A 50%, #E8C070 100%);
+  }
+  .hero-illustration {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -62%);
+    font-size: 80px;
+    filter: drop-shadow(0 8px 20px rgba(0,0,0,0.1));
+  }
+  .hero-top-overlay {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 120px;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.4), transparent);
+  }
+  .hero-bottom-overlay {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 140px;
+    background: linear-gradient(to top, #F5F3F0, transparent);
+  }
+
+  /* Back & Save buttons */
+  .back-btn, .save-btn {
+    position: absolute;
+    top: 58px;
+    width: 36px; height: 36px;
+    background: rgba(255,255,255,0.85);
+    backdrop-filter: blur(8px);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border: none;
+    z-index: 10;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  }
+  .back-btn { left: 20px; }
+  .save-btn { right: 20px; }
+
+  /* Sun hours strip */
+  .sun-strip {
+    position: absolute;
+    bottom: 20px; left: 20px; right: 20px;
+    background: rgba(255,255,255,0.92);
+    backdrop-filter: blur(8px);
+    border-radius: 12px;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    z-index: 10;
+  }
+  .sun-strip-label {
+    font-size: 11px;
+    color: #9A9690;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    flex-shrink: 0;
+  }
+  .sun-bars-with-labels { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+  .sun-bars {
+    display: flex;
+    gap: 3px;
+    align-items: flex-end;
+    height: 24px;
+  }
+  .sun-bar {
+    flex: 1;
+    border-radius: 3px;
+    background: #E0DDD9;
+    height: 10px;
+  }
+  .sun-bar.active { background: #FBBF24; height: 18px; }
+  .sun-bar.current { background: #F5A623; height: 24px; box-shadow: 0 0 6px rgba(245,166,35,0.5); }
+  .sun-bar-labels {
+    display: flex;
+    gap: 3px;
+  }
+  .sun-bar-labels span {
+    flex: 1;
+    text-align: center;
+    font-size: 8px;
+    color: #C0BCB6;
+  }
+  .sun-bar-labels span.current-label { color: #F5A623; font-weight: 700; }
+  .sun-now { font-size: 11px; font-weight: 700; color: #F5A623; flex-shrink: 0; }
+
+  /* Scroll content */
+  .scroll-content {
+    flex: 1;
+    overflow-y: auto;
+    padding-bottom: 100px;
+    animation: slideUp 0.4s ease forwards;
+  }
+  @keyframes slideUp {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  .scroll-content::-webkit-scrollbar { display: none; }
+
+  /* Info section */
+  .info-section { padding: 16px 24px 20px; }
+
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #FDF3E3;
+    border-radius: 20px;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #F5A623;
+    margin-bottom: 10px;
+  }
+  .status-dot {
+    width: 8px; height: 8px;
+    background: #F5A623;
+    border-radius: 50%;
+    box-shadow: 0 0 4px rgba(245,166,35,0.6);
+    animation: blink 2s ease-in-out infinite;
+  }
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .venue-name {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 36px;
+    font-weight: 400;
+    color: #1C1B19;
+    line-height: 1.1;
+    margin-bottom: 6px;
+    letter-spacing: -0.01em;
+  }
+  .venue-subtitle {
+    font-size: 14px;
+    color: #9A9690;
+    margin-bottom: 18px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .subtitle-dot {
+    width: 3px; height: 3px;
+    background: #C0BCB6;
+    border-radius: 50%;
+  }
+
+  /* Stats */
+  .stats-row { display: flex; gap: 10px; margin-bottom: 24px; }
+  .stat-card {
+    flex: 1;
+    background: #F2F0ED;
+    border-radius: 12px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .stat-icon { font-size: 16px; margin-bottom: 2px; }
+  .stat-value { font-size: 15px; font-weight: 600; color: #1C1B19; }
+  .stat-label { font-size: 11px; color: #9A9690; }
+
+  /* Divider */
+  .divider { height: 1px; background: #F2F0ED; margin: 0 24px 20px; }
+
+  /* Section */
+  .section { padding: 0 24px 20px; }
+  .section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #9A9690;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 14px;
+  }
+
+  /* Sun timeline */
+  .sun-timeline {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 4px;
+    height: 52px;
+    margin-bottom: 8px;
+  }
+  .timeline-hour {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    flex: 1;
+  }
+  .timeline-bar {
+    width: 100%;
+    border-radius: 4px;
+    background: #F2F0ED;
+  }
+  .timeline-label {
+    font-size: 9px;
+    color: #C0BCB6;
+  }
+  .timeline-label.current { color: #F5A623; font-weight: 700; }
+  .timeline-bar.current { border: 2px solid #F5A623; box-sizing: border-box; }
+
+  /* Hours */
+  .hours-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .hours-day { font-size: 13px; color: #9A9690; }
+  .hours-time { font-size: 13px; font-weight: 500; color: #1C1B19; }
+  .hours-today .hours-day { font-weight: 600; color: #1C1B19; }
+  .hours-today .hours-time { font-weight: 600; color: #F5A623; }
+
+  /* CTA */
+  .cta-container {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    padding: 16px 24px 36px;
+    background: linear-gradient(to top, #F5F3F0 70%, transparent);
+    z-index: 10;
+  }
+  .cta-btn {
+    width: 100%; height: 56px;
+    background: #1C1B19;
+    color: #F5F3F0;
+    border: none;
+    border-radius: 16px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 16px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    letter-spacing: 0.02em;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .cta-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(28,27,25,0.2); }
+  .cta-arrow {
+    width: 24px; height: 24px;
+    background: #F5A623;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+<div class="phone">
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <span>9:41</span>
+    <div class="status-icons">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="#1C1B19"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="#1C1B19"><path d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z"/></svg>
+    </div>
+  </div>
+  <div class="dynamic-island"></div>
+
+  <!-- Hero -->
+  <div class="hero">
+    <div class="hero-illustration">☕</div>
+    <div class="hero-top-overlay"></div>
+    <div class="hero-bottom-overlay"></div>
+
+    <!-- Back button -->
+    <button class="back-btn">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1C1B19" stroke-width="2" stroke-linecap="round">
+        <path d="M15 18l-6-6 6-6"/>
+      </svg>
+    </button>
+    <!-- Save button -->
+    <button class="save-btn" onclick="this.classList.toggle('saved'); this.querySelector('svg').style.fill = this.classList.contains('saved') ? '#1C1B19' : 'none'">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1C1B19" stroke-width="2" stroke-linejoin="round">
+        <path d="M5 3h14a1 1 0 0 1 1 1v16.5l-8-4-8 4V4a1 1 0 0 1 1-1z"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Scrollable content -->
+  <div class="scroll-content">
+
+    <!-- Info -->
+    <div class="info-section">
+      <div class="status-pill">
+        <div class="status-dot"></div>
+        Sunny now · until 16:30
+      </div>
+      <div style="display:flex; align-items:baseline; gap:12px; margin-bottom:6px;">
+        <div class="venue-name">Solar Brew</div>
+        <div style="display:flex; align-items:center; gap:4px; flex-shrink:0;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="#F5A623"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+          <span style="font-size:14px; font-weight:600; color:#1C1B19;">4.7</span>
+        </div>
+      </div>
+      <div class="venue-subtitle">
+        Nørrebro
+        <div class="subtitle-dot"></div>
+        180m away
+        <div class="subtitle-dot"></div>
+        Open until 20:00
+      </div>
+
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- Sun timeline -->
+    <div class="section">
+      <div class="section-title">Sun exposure today</div>
+      <div class="sun-timeline">
+        <div class="timeline-hour"><div class="timeline-bar" style="height:10px;background:#F2F0ED"></div><span class="timeline-label">8</span></div>
+        <div class="timeline-hour"><div class="timeline-bar" style="height:10px;background:#F2F0ED"></div><span class="timeline-label">9</span></div>
+        <div class="timeline-hour"><div class="timeline-bar" style="height:16px;background:rgba(245,166,35,0.36)"></div><span class="timeline-label">10</span></div>
+        <div class="timeline-hour"><div class="timeline-bar" style="height:28px;background:rgba(245,166,35,0.68)"></div><span class="timeline-label">11</span></div>
+        <div class="timeline-hour"><div class="timeline-bar" style="height:37px;background:rgba(245,166,35,0.92)"></div><span class="timeline-label">12</span></div>
+        <div class="timeline-hour"><div class="timeline-bar" style="height:40px;background:rgba(245,166,35,1)"></div><span class="timeline-label">13</span></div>
+        <div class="timeline-hour"><div class="timeline-bar current" style="height:40px;background:rgba(245,166,35,1)"></div><span class="timeline-label current">14</span></div>
+        <div class="timeline-hour"><div class="timeline-bar" style="height:34px;background:rgba(245,166,35,0.84)"></div><span class="timeline-label">15</span></div>
+        <div class="timeline-hour"><div class="timeline-bar" style="height:25px;background:rgba(245,166,35,0.6)"></div><span class="timeline-label">16</span></div>
+        <div class="timeline-hour"><div class="timeline-bar" style="height:16px;background:rgba(245,166,35,0.36)"></div><span class="timeline-label">17</span></div>
+        <div class="timeline-hour"><div class="timeline-bar" style="height:10px;background:#F2F0ED"></div><span class="timeline-label">18</span></div>
+        <div class="timeline-hour"><div class="timeline-bar" style="height:10px;background:#F2F0ED"></div><span class="timeline-label">19</span></div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- Opening hours -->
+    <div class="section">
+      <div class="section-title">Opening hours</div>
+      <div class="hours-row"><span class="hours-day">Monday</span><span class="hours-time">7:00 – 18:00</span></div>
+      <div class="hours-row"><span class="hours-day">Tuesday</span><span class="hours-time">7:00 – 18:00</span></div>
+      <div class="hours-row"><span class="hours-day">Wednesday</span><span class="hours-time">7:00 – 18:00</span></div>
+      <div class="hours-row hours-today"><span class="hours-day">Thursday</span><span class="hours-time">7:00 – 20:00</span></div>
+      <div class="hours-row"><span class="hours-day">Friday</span><span class="hours-time">7:00 – 20:00</span></div>
+      <div class="hours-row"><span class="hours-day">Saturday</span><span class="hours-time">8:00 – 18:00</span></div>
+      <div class="hours-row"><span class="hours-day">Sunday</span><span class="hours-time">9:00 – 16:00</span></div>
+    </div>
+
+  </div>
+
+  <!-- CTA -->
+  <div class="cta-container">
+    <button class="cta-btn">
+      Get directions
+      <div class="cta-arrow">→</div>
+    </button>
+  </div>
+
+</div>
+</body>
+</html>

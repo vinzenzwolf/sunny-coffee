@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sunny Coffee — 04 Explore</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#E9E6E2; font-family:'DM Sans',sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; padding:48px 24px; }
+
+.phone { width:393px; height:852px; border-radius:54px; box-shadow:0 40px 120px rgba(0,0,0,0.13),0 0 0 1px rgba(0,0,0,0.06),inset 0 0 0 1px rgba(255,255,255,0.8); position:relative; overflow:hidden; background:#F5F3F0; }
+.di { position:absolute; top:10px; left:50%; transform:translateX(-50%); width:120px; height:34px; background:#1C1B19; border-radius:20px; z-index:30; }
+.status-bar { position:absolute; top:0; left:0; right:0; display:flex; justify-content:space-between; align-items:center; padding:16px 32px 0; font-size:15px; font-weight:500; color:#1C1B19; z-index:30; }
+
+.scroll { position:absolute; inset:0; overflow-y:auto; overflow-x:hidden; padding-bottom:108px; scrollbar-width:none; }
+.scroll::-webkit-scrollbar { display:none; }
+
+/* ── HEADER ── */
+.header { padding:68px 24px 20px; }
+.sun-count { display:flex; align-items:baseline; gap:8px; margin-bottom:6px; }
+.sun-number { font-family:'Cormorant Garamond',serif; font-size:52px; font-weight:300; color:#1C1B19; line-height:1; letter-spacing:-0.02em; }
+.sun-label { font-size:13px; color:#B8B4AF; font-weight:400; padding-bottom:4px; }
+.sun-label em { font-style:italic; color:#F5A623; }
+.verified-badge { display:inline-flex; align-items:center; gap:6px; background:#EDEAE6; border:1px solid #E0DDD9; border-radius:20px; padding:5px 12px 5px 9px; }
+.badge-dot { width:6px; height:6px; background:#F5A623; border-radius:50%; flex-shrink:0; }
+.badge-text { font-size:11px; color:#6B6762; font-weight:400; }
+
+/* ── GRID ── */
+.grid { padding:0 20px; display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+
+.card { border-radius:16px; overflow:hidden; cursor:pointer; position:relative; box-shadow:0 3px 16px rgba(0,0,0,0.09); transition:transform 0.16s ease; }
+.card:active { transform:scale(0.97); }
+
+.card-photo { width:100%; height:120px; position:relative; }
+.card-photo-bg { width:100%; height:100%; }
+.card-photo::after { content:''; position:absolute; inset:0; background:linear-gradient(to bottom,rgba(0,0,0,0) 20%,rgba(14,12,10,0.72) 100%); pointer-events:none; }
+
+.card-overlay { position:absolute; bottom:0; left:0; right:0; padding:9px 10px; z-index:2; }
+.card-name { font-size:13px; font-weight:600; color:#fff; line-height:1.1; margin-bottom:1px; }
+.card-area { font-size:10px; color:rgba(255,255,255,0.6); }
+
+.card-info { background:#fff; padding:9px 10px 10px; display:flex; flex-direction:column; gap:4px; }
+.tag { font-size:10px; font-weight:500; padding:2px 7px; border-radius:20px; display:inline-block; align-self:flex-start; }
+.tag-sun  { background:#FEF3E2; color:#E8931A; }
+.tag-later { background:#F3F1EE; color:#9A9690; }
+.card-open { font-size:10px; color:#C0BCB8; }
+
+.card.dim { opacity:0.45; }
+
+/* ── DIVIDER ── */
+.divider { display:flex; align-items:center; gap:12px; padding:18px 20px 10px; }
+.divider-label { font-size:10px; font-weight:600; color:#C8C4BF; letter-spacing:0.08em; text-transform:uppercase; white-space:nowrap; }
+.divider-line { flex:1; height:1px; background:#EAE7E3; }
+
+/* ── BOTTOM NAV ── */
+.bnav { position:absolute; bottom:16px; left:20px; right:20px; height:76px; background:rgba(255,255,255,0.2); backdrop-filter:blur(28px) saturate(180%); -webkit-backdrop-filter:blur(28px) saturate(180%); border-radius:28px; border:1px solid rgba(255,255,255,0.5); box-shadow:0 2px 24px rgba(0,0,0,0.08),inset 0 1px 0 rgba(255,255,255,0.65); display:flex; align-items:center; justify-content:space-around; padding-top:4px; z-index:10; overflow:hidden; }
+.bshim { position:absolute; top:0; left:10%; right:10%; height:1px; background:linear-gradient(90deg,transparent,rgba(255,255,255,0.9) 30%,rgba(255,255,255,0.9) 70%,transparent); animation:shim 4s ease-in-out infinite; }
+@keyframes shim{0%,100%{opacity:.5}50%{opacity:1}}
+.bglow { position:absolute; inset:0; background:linear-gradient(180deg,rgba(255,255,255,0.22),rgba(255,255,255,0.04)); border-radius:28px; pointer-events:none; }
+.ni { display:flex; flex-direction:column; align-items:center; gap:4px; min-width:60px; position:relative; z-index:1; }
+.nlbl { font-size:10px; font-weight:500; color:rgba(60,60,67,0.6); }
+.nlbl.on { font-weight:700; color:#1C1B19; }
+.ndot { width:4px; height:4px; background:#F5A623; border-radius:50%; }
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="di"></div>
+  <div class="status-bar">
+    <span>9:41</span>
+    <div style="display:flex;gap:6px;align-items:center">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="#1C1B19"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="#1C1B19"><path d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.33C7 21.4 7.6 22 8.33 22h7.33c.74 0 1.34-.6 1.34-1.33V5.33C17 4.6 16.4 4 15.67 4z"/></svg>
+    </div>
+  </div>
+
+  <div class="scroll">
+    <div class="header">
+      <div class="sun-count">
+        <span class="sun-number">4</span>
+        <span class="sun-label">cafés <em>in the sun</em> right now</span>
+      </div>
+      <div class="verified-badge">
+        <div class="badge-dot"></div>
+        <span class="badge-text">Personally tested by us</span>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="card-photo"><div class="card-photo-bg" style="background:linear-gradient(160deg,#F0C87A,#D4944A,#B06828)"></div>
+          <div class="card-overlay"><div class="card-name">Solar Brew</div><div class="card-area">Nørrebro</div></div>
+        </div>
+        <div class="card-info"><span class="tag tag-sun">☀ Until 17:00</span><span class="card-open">Open until 18:00</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-photo"><div class="card-photo-bg" style="background:linear-gradient(160deg,#E8D4A0,#C4A060,#9A7038)"></div>
+          <div class="card-overlay"><div class="card-name">Café Nørre</div><div class="card-area">Nørrebro</div></div>
+        </div>
+        <div class="card-info"><span class="tag tag-sun">☀ Until 16:30</span><span class="card-open">Open until 20:00</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-photo"><div class="card-photo-bg" style="background:linear-gradient(160deg,#F4D890,#D8A848,#AA7C28)"></div>
+          <div class="card-overlay"><div class="card-name">Lys Café</div><div class="card-area">Østerbro</div></div>
+        </div>
+        <div class="card-info"><span class="tag tag-sun">☀ Until 18:00</span><span class="card-open">Open until 19:00</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-photo"><div class="card-photo-bg" style="background:linear-gradient(160deg,#DCC890,#B89450,#8C6A28)"></div>
+          <div class="card-overlay"><div class="card-name">Mørk Coffee</div><div class="card-area">Frederiksberg</div></div>
+        </div>
+        <div class="card-info"><span class="tag tag-sun">☀ Until 15:30</span><span class="card-open">Open until 17:00</span></div>
+      </div>
+    </div>
+
+    <div class="divider"><span class="divider-label">Sun later</span><div class="divider-line"></div></div>
+
+    <div class="grid">
+      <div class="card dim">
+        <div class="card-photo"><div class="card-photo-bg" style="background:linear-gradient(160deg,#C8C4BC,#A8A49C,#888480)"></div>
+          <div class="card-overlay"><div class="card-name">The Shade</div><div class="card-area">Vesterbro</div></div>
+        </div>
+        <div class="card-info"><span class="tag tag-later">🌤 Sun at 15:00</span><span class="card-open">Open until 19:00</span></div>
+      </div>
+
+      <div class="card dim">
+        <div class="card-photo"><div class="card-photo-bg" style="background:linear-gradient(160deg,#C0BCB4,#A09C94,#807C74)"></div>
+          <div class="card-overlay"><div class="card-name">Grød</div><div class="card-area">Nørrebro</div></div>
+        </div>
+        <div class="card-info"><span class="tag tag-later">🌤 Sun at 16:00</span><span class="card-open">Open until 20:00</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bnav">
+    <div class="bshim"></div><div class="bglow"></div>
+    <div class="ni"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 2L2 9.5V21h7v-6h6v6h7V9.5L12 2z" stroke="#9A9690" stroke-width="1.6" stroke-linejoin="round"/></svg><span class="nlbl">Map</span></div>
+    <div class="ni"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7.5" stroke="#1C1B19" stroke-width="1.6"/><path d="M17 17l3.5 3.5" stroke="#1C1B19" stroke-width="1.6" stroke-linecap="round"/><path d="M8.5 11h5M11 8.5v5" stroke="#1C1B19" stroke-width="1.4" stroke-linecap="round"/></svg><span class="nlbl on">Explore</span><div class="ndot"></div></div>
+    <div class="ni"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M5 3h14a1 1 0 0 1 1 1v16.5l-8-4-8 4V4a1 1 0 0 1 1-1z" stroke="#9A9690" stroke-width="1.6" stroke-linejoin="round"/></svg><span class="nlbl">Saved</span></div>
+    <div class="ni"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.5" stroke="#9A9690" stroke-width="1.6"/><path d="M4.5 20c0-4 3.358-7 7.5-7s7.5 3 7.5 7" stroke="#9A9690" stroke-width="1.6" stroke-linecap="round"/></svg><span class="nlbl">Profile</span></div>
+  </div>
+</div>
+</body>
+</html>

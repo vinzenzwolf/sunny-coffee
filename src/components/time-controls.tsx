@@ -1,43 +1,24 @@
-/**
- * Time controls overlay
- *
- * Renders as a floating bottom panel with:
- *  - Shadow on/off toggle
- *  - Current date/time display
- *  - Hour step buttons (−1h / +1h)
- *  - "Now" reset button
- *  - A manual hour slider (drag left/right across the bar)
- *
- * The component is purely presentational – all state lives in the parent.
- */
-
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   GestureResponderEvent,
   LayoutChangeEvent,
+  Platform,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 interface TimeControlsProps {
   date: Date;
-  shadowsEnabled: boolean;
-  sunDescription: string;
   buildingCount: number;
   isLoading: boolean;
+  bottom: number;
   onDateChange: (newDate: Date) => void;
-  onToggleShadows: () => void;
+  onScrubStart?: () => void;
+  onScrubEnd?: () => void;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+const TICK_HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
 
 function padTwo(n: number): string {
   return n.toString().padStart(2, '0');
@@ -47,48 +28,23 @@ function formatTime(date: Date): string {
   return `${padTwo(date.getHours())}:${padTwo(date.getMinutes())}`;
 }
 
-function formatDate(date: Date): string {
-  return date.toLocaleDateString(undefined, {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-  });
+function sliderXToMinutes(fraction: number): number {
+  return Math.round(Math.min(Math.max(fraction, 0), 1) * 1439);
 }
-
-function addHours(date: Date, hours: number): Date {
-  const next = new Date(date);
-  next.setHours(next.getHours() + hours);
-  return next;
-}
-
-/** Convert slider X position (0–1) to hour (0–23). */
-function sliderXToHour(fraction: number): number {
-  return Math.round(Math.min(Math.max(fraction, 0), 1) * 23);
-}
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 
 export function TimeControls({
   date,
-  shadowsEnabled,
-  sunDescription,
-  buildingCount,
-  isLoading,
+  bottom,
   onDateChange,
-  onToggleShadows,
+  onScrubStart,
+  onScrubEnd,
 }: TimeControlsProps) {
   const sliderWidth = useRef(0);
+  const lastSliderMinutes = useRef<number | null>(null);
+  const lastSentAtMs = useRef(0);
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const [scrubMinutes, setScrubMinutes] = useState<number | null>(null);
 
-  const handleStepHour = useCallback(
-    (delta: number) => onDateChange(addHours(date, delta)),
-    [date, onDateChange],
-  );
-
-  const handleResetNow = useCallback(() => onDateChange(new Date()), [onDateChange]);
-
-  // Slider touch handlers
   const handleSliderLayout = useCallback((e: LayoutChangeEvent) => {
     sliderWidth.current = e.nativeEvent.layout.width;
   }, []);
@@ -97,237 +53,210 @@ export function TimeControls({
     (e: GestureResponderEvent) => {
       if (sliderWidth.current === 0) return;
       const fraction = e.nativeEvent.locationX / sliderWidth.current;
-      const hour = sliderXToHour(fraction);
+      const minutes = sliderXToMinutes(fraction);
+      if (lastSliderMinutes.current === minutes) return;
+      lastSliderMinutes.current = minutes;
+      setScrubMinutes(minutes);
+
       const next = new Date(date);
-      next.setHours(hour, 0, 0, 0);
-      onDateChange(next);
+      next.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+      const now = Date.now();
+      if (now - lastSentAtMs.current >= 40) {
+        lastSentAtMs.current = now;
+        onDateChange(next);
+      }
     },
     [date, onDateChange],
   );
 
-  const hourFraction = date.getHours() / 23;
+  const displayedMinutes = scrubMinutes ?? (date.getHours() * 60 + date.getMinutes());
+  const dayFraction = displayedMinutes / 1439;
+  const displayedHour = Math.floor(displayedMinutes / 60);
 
   return (
-    <View style={styles.container}>
-      {/* Status row */}
-      <View style={styles.statusRow}>
-        <Text style={styles.statusText} numberOfLines={1}>
-          {isLoading ? 'Loading buildings…' : `${buildingCount} buildings`}
-        </Text>
-        <Text style={styles.statusText} numberOfLines={1}>
-          {sunDescription}
-        </Text>
+    <View style={[styles.container, { bottom }]}>
+      {/* Header: label left, dot + time right */}
+      <View style={styles.head}>
+        <Text style={styles.label}>Sun position</Text>
+        <View style={styles.val}>
+          <View style={styles.dot} />
+          <Text style={styles.time}>{formatTime(date)}</Text>
+        </View>
       </View>
 
-      {/* Hour slider */}
+      {/* Slider */}
       <View
-        style={styles.sliderTrack}
+        style={styles.sliderArea}
         onLayout={handleSliderLayout}
         onStartShouldSetResponder={() => true}
         onMoveShouldSetResponder={() => true}
-        onResponderGrant={handleSliderTouch}
+        onResponderTerminationRequest={() => false}
+        onResponderGrant={(e) => {
+          setIsScrubbing(true);
+          onScrubStart?.();
+          handleSliderTouch(e);
+        }}
         onResponderMove={handleSliderTouch}
+        onResponderRelease={() => {
+          if (scrubMinutes !== null) {
+            const next = new Date(date);
+            next.setHours(Math.floor(scrubMinutes / 60), scrubMinutes % 60, 0, 0);
+            onDateChange(next);
+          }
+          setIsScrubbing(false);
+          setScrubMinutes(null);
+          lastSliderMinutes.current = null;
+          lastSentAtMs.current = 0;
+          onScrubEnd?.();
+        }}
+        onResponderTerminate={() => {
+          setIsScrubbing(false);
+          setScrubMinutes(null);
+          lastSliderMinutes.current = null;
+          lastSentAtMs.current = 0;
+          onScrubEnd?.();
+        }}
       >
-        <View style={[styles.sliderFill, { width: `${hourFraction * 100}%` }]} />
-        <View style={[styles.sliderThumb, { left: `${hourFraction * 100}%` }]} />
-        {/* Hour labels */}
-        <Text style={[styles.sliderLabel, { left: 2 }]}>0h</Text>
-        <Text style={[styles.sliderLabel, { left: '50%', transform: [{ translateX: -8 }] }]}>
-          12h
-        </Text>
-        <Text style={[styles.sliderLabel, { right: 2 }]}>23h</Text>
-      </View>
-
-      {/* Control row */}
-      <View style={styles.controlRow}>
-        {/* Shadow toggle */}
-        <TouchableOpacity
-          style={[styles.toggleBtn, shadowsEnabled && styles.toggleBtnActive]}
-          onPress={onToggleShadows}
-          activeOpacity={0.7}
-        >
-          <Text style={[styles.toggleText, shadowsEnabled && styles.toggleTextActive]}>
-            {shadowsEnabled ? 'Shadows ON' : 'Shadows OFF'}
-          </Text>
-        </TouchableOpacity>
-
-        {/* Hour steppers */}
-        <View style={styles.stepperRow}>
-          <TouchableOpacity
-            style={styles.stepBtn}
-            onPress={() => handleStepHour(-1)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.stepBtnText}>−1h</Text>
-          </TouchableOpacity>
-
-          <View style={styles.timePill}>
-            <Text style={styles.timeText}>{formatTime(date)}</Text>
-            <Text style={styles.dateText}>{formatDate(date)}</Text>
-          </View>
-
-          <TouchableOpacity
-            style={styles.stepBtn}
-            onPress={() => handleStepHour(1)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.stepBtnText}>+1h</Text>
-          </TouchableOpacity>
+        <View style={styles.track}>
+          <View style={[styles.fill, { width: `${dayFraction * 100}%` as `${number}%` }]} />
+          <View
+            style={[
+              styles.thumb,
+              isScrubbing && styles.thumbActive,
+              { left: `${dayFraction * 100}%` as `${number}%` },
+            ]}
+          />
         </View>
 
-        {/* Reset to now */}
-        <TouchableOpacity style={styles.nowBtn} onPress={handleResetNow} activeOpacity={0.7}>
-          <Text style={styles.nowBtnText}>Now</Text>
-        </TouchableOpacity>
+        <View style={styles.ticks} pointerEvents="none">
+          {TICK_HOURS.map((h) => (
+            <Text key={h} style={[styles.tick, displayedHour === h && styles.tickActive]}>
+              {h}
+            </Text>
+          ))}
+        </View>
       </View>
     </View>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Styles
-// ---------------------------------------------------------------------------
-
-const SHADOW_CARD = {
-  shadowColor: '#000',
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.15,
-  shadowRadius: 8,
-  elevation: 6,
-};
+const CARD_SHADOW = Platform.select({
+  ios: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.09,
+    shadowRadius: 24,
+  },
+  android: { elevation: 6 },
+}) ?? {};
 
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    bottom: 32,
-    left: 12,
-    right: 12,
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    borderRadius: 16,
-    padding: 12,
-    gap: 10,
-    ...SHADOW_CARD,
+    left: 20,
+    right: 20,
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    paddingTop: 14,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    ...CARD_SHADOW,
   },
 
-  // Status
-  statusRow: {
+  // Header
+  head: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
   },
-  statusText: {
-    fontSize: 11,
-    color: '#666',
-    flexShrink: 1,
+  label: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#B0ADA8',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  val: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  dot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: '#F5A623',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#F5A623',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.6,
+        shadowRadius: 4,
+      },
+    }),
+  },
+  time: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1C1B19',
   },
 
-  // Slider
-  sliderTrack: {
-    height: 28,
-    backgroundColor: '#e0e0e0',
-    borderRadius: 14,
-    overflow: 'visible',
-    justifyContent: 'center',
+  // Track + ticks share one touch area
+  sliderArea: {
+    paddingBottom: 2, // ticks sit just below track
   },
-  sliderFill: {
+  track: {
+    height: 4,
+    backgroundColor: '#F0EDE9',
+    borderRadius: 2,
+    overflow: 'visible',
+  },
+  fill: {
     position: 'absolute',
     left: 0,
     top: 0,
     bottom: 0,
-    backgroundColor: '#FFB300',
-    borderRadius: 14,
+    borderRadius: 2,
+    backgroundColor: '#F5A623',
   },
-  sliderThumb: {
+  thumb: {
     position: 'absolute',
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: '#fff',
-    borderWidth: 2,
-    borderColor: '#FFB300',
-    top: 3,
-    marginLeft: -11,
-    ...SHADOW_CARD,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#F5A623',
+    borderWidth: 2.5,
+    borderColor: '#fff',
+    top: -6,
+    marginLeft: -8,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#F5A623',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.45,
+        shadowRadius: 4,
+      },
+      android: { elevation: 3 },
+    }),
   },
-  sliderLabel: {
-    position: 'absolute',
-    fontSize: 9,
-    color: '#999',
-    bottom: -14,
+  thumbActive: {
+    transform: [{ scale: 1.15 }],
   },
-
-  // Controls
-  controlRow: {
+  ticks: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 6,
+    marginTop: 7,
   },
-
-  // Toggle
-  toggleBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1.5,
-    borderColor: '#ccc',
-    backgroundColor: '#f5f5f5',
+  tick: {
+    fontSize: 9,
+    color: '#D8D4CF',
+    fontWeight: '500',
+    flex: 1,
+    textAlign: 'center',
   },
-  toggleBtnActive: {
-    borderColor: '#1565C0',
-    backgroundColor: '#E3F2FD',
-  },
-  toggleText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#888',
-  },
-  toggleTextActive: {
-    color: '#1565C0',
-  },
-
-  // Time stepper
-  stepperRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  stepBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: '#f0f0f0',
-  },
-  stepBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#333',
-  },
-  timePill: {
-    alignItems: 'center',
-    minWidth: 64,
-  },
-  timeText: {
-    fontSize: 18,
+  tickActive: {
+    color: '#F5A623',
     fontWeight: '700',
-    color: '#1a1a1a',
-    letterSpacing: 1,
-  },
-  dateText: {
-    fontSize: 10,
-    color: '#888',
-    marginTop: -2,
-  },
-
-  // Now button
-  nowBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: '#FFB300',
-  },
-  nowBtnText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#fff',
   },
 });
