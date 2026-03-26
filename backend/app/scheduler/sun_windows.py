@@ -12,6 +12,9 @@ For each cafe:
 import asyncio
 import json
 import logging
+import os
+import warnings
+from concurrent.futures import ProcessPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from math import tan, radians, cos, sin
 from typing import Any
@@ -33,6 +36,33 @@ MIN_SUN_ALTITUDE_DEG = 1.0
 MAX_SHADOW_LENGTH_M = 400.0
 SLOT_MINUTES = 5
 TZ = timezone(timedelta(hours=1))  # CET (approximate)
+COPENHAGEN_CENTER = (55.6761, 12.5683)
+
+# ---------------------------------------------------------------------------
+# Worker process globals (populated by _worker_init)
+# ---------------------------------------------------------------------------
+
+_worker_buildings: list[dict] = []
+_worker_tree: STRtree | None = None
+
+
+def _worker_init(buildings: list[dict]) -> None:
+    global _worker_buildings, _worker_tree
+    _worker_buildings = buildings
+    _worker_tree = _build_spatial_index(buildings)
+
+
+def _worker_compute(args: tuple) -> dict:
+    cafe, sun_slots, target_date_str = args
+    intervals = compute_sun_window_for_cafe(
+        cafe["lat"], cafe["lng"], _worker_buildings, _worker_tree, sun_slots,  # type: ignore[arg-type]
+    )
+    return {
+        "cafe_id": cafe["id"],
+        "cafe_name": cafe.get("name", cafe["id"]),
+        "date": target_date_str,
+        "intervals": intervals,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +199,31 @@ def project_shadow(building_coords: list[tuple], height_m: float,
 
 
 # ---------------------------------------------------------------------------
+# Sun slot precomputation (once per day, shared across all cafes)
+# ---------------------------------------------------------------------------
+
+def _precompute_sun_slots(target_date: date) -> list[tuple[int, float, float]]:
+    """Return (slot_idx, altitude_deg, azimuth_deg) for every slot where sun is up.
+
+    Uses Copenhagen city center — variation across the city is < 0.1°, negligible
+    for shadow direction purposes.
+    """
+    lat, lng = COPENHAGEN_CENTER
+    total_slots = (24 * 60) // SLOT_MINUTES
+    slots = []
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        for slot in range(total_slots):
+            minutes = slot * SLOT_MINUTES
+            dt = datetime(target_date.year, target_date.month, target_date.day,
+                          minutes // 60, minutes % 60, 0, tzinfo=TZ)
+            alt = get_altitude(lat, lng, dt)
+            if alt >= MIN_SUN_ALTITUDE_DEG:
+                slots.append((slot, alt, get_azimuth(lat, lng, dt)))
+    return slots
+
+
+# ---------------------------------------------------------------------------
 # Per-cafe sun window
 # ---------------------------------------------------------------------------
 
@@ -195,34 +250,26 @@ def _nearby_buildings(cafe_lat: float, cafe_lng: float,
 
 def compute_sun_window_for_cafe(
     cafe_lat: float, cafe_lng: float,
-    buildings: list[dict], tree: STRtree, target_date: date,
+    buildings: list[dict], tree: STRtree,
+    sun_slots: list[tuple[int, float, float]],
 ) -> list[dict]:
+    """sun_slots: list of (slot_idx, altitude_deg, azimuth_deg) precomputed for the day."""
     point = Point(cafe_lng, cafe_lat)
     nearby = _nearby_buildings(cafe_lat, cafe_lng, buildings, tree)
     total_slots = (24 * 60) // SLOT_MINUTES
-    in_sun = []
+    in_sun = [False] * total_slots
 
-    for slot in range(total_slots):
-        minutes = slot * SLOT_MINUTES
-        dt = datetime(
-            target_date.year, target_date.month, target_date.day,
-            minutes // 60, minutes % 60, 0,
-            tzinfo=TZ,
-        )
-        sun_alt = get_altitude(cafe_lat, cafe_lng, dt)
-        if sun_alt < MIN_SUN_ALTITUDE_DEG:
-            in_sun.append(False)
-            continue
-        sun_az = get_azimuth(cafe_lat, cafe_lng, dt)
+    sun_slot_set = {s[0] for s in sun_slots}
+    for slot, sun_alt, sun_az in sun_slots:
         shadows = [
             s for b in nearby
             if (s := project_shadow(b["coords"], b["height_m"], sun_alt, sun_az, cafe_lat)) is not None
         ]
         if shadows:
             merged = unary_union(shadows)
-            in_sun.append(not merged.contains(point))
+            in_sun[slot] = not merged.contains(point)
         else:
-            in_sun.append(True)
+            in_sun[slot] = True
 
     intervals = []
     start_slot = None
@@ -274,24 +321,31 @@ async def compute_all_sun_windows(target_date: date | None = None) -> None:
         logger.warning("No buildings in DB — run building sync first")
         return
 
-    logger.info("Building spatial index...")
-    tree = await asyncio.to_thread(_build_spatial_index, buildings)
-    logger.info("Spatial index ready")
+    logger.info("Pre-computing sun angles for the day...")
+    sun_slots = _precompute_sun_slots(target_date)
+    logger.info(f"{len(sun_slots)} slots with sun above horizon")
 
-    completed = 0
+    n_workers = max(1, (os.cpu_count() or 2))
+    logger.info(f"Computing with {n_workers} worker processes...")
 
-    async def process(cafe: dict[str, Any]) -> dict:
-        nonlocal completed
-        intervals = await asyncio.to_thread(
-            compute_sun_window_for_cafe,
-            cafe["lat"], cafe["lng"], buildings, tree, target_date,
-        )
-        completed += 1
-        logger.info(f"[{completed}/{len(cafes)}] {cafe.get('name', cafe['id'])}")
-        return {"cafe_id": cafe["id"], "date": str(target_date), "intervals": intervals}
+    args = [(cafe, sun_slots, str(target_date)) for cafe in cafes]
 
-    logger.info(f"Computing {(24 * 60) // SLOT_MINUTES} time slots per cafe...")
-    results = await asyncio.gather(*[process(c) for c in cafes])
+    loop = asyncio.get_running_loop()
+    results: list[dict] = []
+
+    def run_pool() -> list[dict]:
+        with ProcessPoolExecutor(
+            max_workers=n_workers,
+            initializer=_worker_init,
+            initargs=(buildings,),
+        ) as executor:
+            out = []
+            for i, r in enumerate(executor.map(_worker_compute, args, chunksize=5), 1):
+                logger.info(f"[{i}/{len(cafes)}] {r['cafe_name']}")
+                out.append(r)
+            return out
+
+    results = await loop.run_in_executor(None, run_pool)
 
     logger.info(f"Upserting {len(results)} sun windows to DB...")
     pool = await get_pool()
