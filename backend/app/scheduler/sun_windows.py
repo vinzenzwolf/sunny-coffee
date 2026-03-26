@@ -67,7 +67,7 @@ def _resolve_height(tags: dict) -> float:
             return float(tags["building:levels"]) * 3.0
         except ValueError:
             pass
-    return 9.0
+    return 10.0
 
 
 # ---------------------------------------------------------------------------

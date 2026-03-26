@@ -223,7 +223,7 @@ export const MAP_HTML = `<!DOCTYPE html>
           features.push({
             type: 'Feature',
             geometry: { type: 'Polygon', coordinates: [ring] },
-            properties: { height: row.height_m || 9.0 },
+            properties: { height: row.height_m || 10.0 },
           });
         }
         backendBuildings = { type: 'FeatureCollection', features: features };
@@ -238,9 +238,21 @@ export const MAP_HTML = `<!DOCTYPE html>
   }
 
   function getBuildings() {
-    // Use backend buildings if loaded, otherwise fall back to rendered features
     if (backendBuildings && backendBuildings.features && backendBuildings.features.length > 0) {
-      return backendBuildings;
+      var bounds = map.getBounds();
+      var padLng = (bounds.getEast() - bounds.getWest()) * 0.75;
+      var padLat = (bounds.getNorth() - bounds.getSouth()) * 0.75;
+      var minLng = bounds.getWest() - padLng;
+      var maxLng = bounds.getEast() + padLng;
+      var minLat = bounds.getSouth() - padLat;
+      var maxLat = bounds.getNorth() + padLat;
+      var filtered = backendBuildings.features.filter(function(f) {
+        var coords = f.geometry.coordinates[0];
+        return coords.some(function(p) {
+          return p[0] >= minLng && p[0] <= maxLng && p[1] >= minLat && p[1] <= maxLat;
+        });
+      });
+      return { type: 'FeatureCollection', features: filtered };
     }
     return queryBuildings();
   }
@@ -333,7 +345,7 @@ export const MAP_HTML = `<!DOCTYPE html>
         if (seen[key]) return;
         seen[key] = true;
 
-        var h = parseFloat((f.properties && f.properties.render_height) || 0) || 9.0;
+        var h = parseFloat((f.properties && f.properties.render_height) || 0) || 10.0;
         features.push({ type: 'Feature', geometry: geom, properties: { height: h } });
       } catch (_) {}
     });
@@ -618,7 +630,7 @@ export const MAP_HTML = `<!DOCTYPE html>
     for (var fi = 0; fi < buildings.features.length; fi++) {
       if (features.length >= maxFeatures) break;
       var f = buildings.features[fi];
-      var h = (f.properties && f.properties.height) || 9.0;
+      var h = (f.properties && f.properties.height) || 10.0;
       var lenM = h * spM;
       var dLon = sdLonU * lenM / (111320 * cosLat);
       var dLat = sdLatU * lenM / 111320;
