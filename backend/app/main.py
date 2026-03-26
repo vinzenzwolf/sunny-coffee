@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import close_pool
-from app.routers import cafes, users
+from app.routers import cafes, users, buildings
 from app.scheduler.runner import create_scheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -34,6 +34,7 @@ app.add_middleware(
 
 app.include_router(cafes.router)
 app.include_router(users.router)
+app.include_router(buildings.router)
 
 
 @app.get("/health")

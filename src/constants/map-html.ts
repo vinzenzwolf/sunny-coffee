@@ -18,6 +18,7 @@
 const MAPLIBRE_VER = '4.7.1';
 const SUNCALC_VER  = '1.9.0';
 const OFMAP_STYLE  = 'https://tiles.openfreemap.org/styles/liberty';
+const BACKEND_URL  = 'https://server.vinzenzwolf.ch';
 
 export const MAP_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -161,6 +162,8 @@ export const MAP_HTML = `<!DOCTYPE html>
   var cafeFeatures = [];
   var cafeMarkers = [];
   var lastCafeSunById = {};
+  // Backend buildings: fetched once, used for all shadow computation
+  var backendBuildings = null; // null = not yet loaded, [] = loaded but empty
 
   /* ── Inline sun position (fallback when SunCalc CDN fails) ─────────────── */
   function calcSunPos(date, latDeg, lonDeg) {
@@ -202,7 +205,47 @@ export const MAP_HTML = `<!DOCTYPE html>
     } catch (_) {}
   }
 
-  /* ── Building data from rendered features (instant, same as what's visible) */
+  /* ── Backend buildings: fetch once on load ──────────────────────────────── */
+  function fetchBackendBuildings() {
+    fetch('${BACKEND_URL}/buildings')
+      .then(function (r) { return r.json(); })
+      .then(function (rows) {
+        var features = [];
+        for (var i = 0; i < rows.length; i++) {
+          var row = rows[i];
+          var coords = Array.isArray(row.coords) ? row.coords : [];
+          if (coords.length < 3) continue;
+          // Ensure ring is closed
+          var ring = coords.map(function(c) { return [c[0], c[1]]; });
+          if (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1]) {
+            ring.push(ring[0]);
+          }
+          features.push({
+            type: 'Feature',
+            geometry: { type: 'Polygon', coordinates: [ring] },
+            properties: { height: row.height_m || 9.0 },
+          });
+        }
+        backendBuildings = { type: 'FeatureCollection', features: features };
+        postToRN({ type: 'STATUS', buildingCount: features.length, sunAlt: 0, sunAz: 0 });
+        if (mapLoaded) scheduleShadowUpdate(0);
+      })
+      .catch(function (e) {
+        postToRN({ type: 'WARNING', message: 'Could not load buildings from backend, using map tiles' });
+        backendBuildings = [];  // mark as failed so we fall back
+        if (mapLoaded) scheduleShadowUpdate(0);
+      });
+  }
+
+  function getBuildings() {
+    // Use backend buildings if loaded, otherwise fall back to rendered features
+    if (backendBuildings && backendBuildings.features && backendBuildings.features.length > 0) {
+      return backendBuildings;
+    }
+    return queryBuildings();
+  }
+
+  /* ── Building data from rendered features (fallback) ────────────────────── */
   function getPaddedQueryBox() {
     var c = map.getContainer();
     var w = c.clientWidth;
@@ -688,7 +731,7 @@ export const MAP_HTML = `<!DOCTYPE html>
     try {
       ensureShadowLayer();
 
-      var buildings = queryBuildings();
+      var buildings = getBuildings();
       var center = map.getCenter();
       var sun = getSunPos(currentDate, center.lat, center.lng);
       var zoom = map.getZoom();
@@ -856,6 +899,8 @@ export const MAP_HTML = `<!DOCTYPE html>
 
     mapLoaded = true;
     renderCafeMarkers();
+    // Fetch backend buildings before first shadow update
+    fetchBackendBuildings();
     setTimeout(function () { scheduleShadowUpdate(0); }, 250);
     postToRN({ type: 'MAP_READY' });
   });
