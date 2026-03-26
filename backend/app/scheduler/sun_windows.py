@@ -240,10 +240,21 @@ async def sync_cafes_from_overpass() -> None:
 );
 out center tags;
 """
-    async with httpx.AsyncClient(timeout=35) as client:
-        res = await client.post(OVERPASS_URL, data={"data": query})
-        res.raise_for_status()
-        elements = res.json().get("elements", [])
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                res = await client.post(OVERPASS_URL, data={"data": query})
+                res.raise_for_status()
+                elements = res.json().get("elements", [])
+                break
+        except (httpx.HTTPStatusError, httpx.TimeoutException) as e:
+            if attempt == 2:
+                raise
+            wait = 10 * (attempt + 1)
+            logger.warning(f"Overpass error ({e}), retrying in {wait}s...")
+            await asyncio.sleep(wait)
+    else:
+        elements = []
 
     rows = []
     for el in elements:
