@@ -162,8 +162,6 @@ export const MAP_HTML = `<!DOCTYPE html>
   var cafeFeatures = [];
   var cafeMarkers = [];
   var lastCafeSunById = {};
-  // Backend buildings: fetched once, used for all shadow computation
-  var backendBuildings = null; // null = not yet loaded, [] = loaded but empty
 
   /* ── Inline sun position (fallback when SunCalc CDN fails) ─────────────── */
   function calcSunPos(date, latDeg, lonDeg) {
@@ -205,59 +203,7 @@ export const MAP_HTML = `<!DOCTYPE html>
     } catch (_) {}
   }
 
-  /* ── Backend buildings: fetch once on load ──────────────────────────────── */
-  function fetchBackendBuildings() {
-    fetch('${BACKEND_URL}/buildings')
-      .then(function (r) { return r.json(); })
-      .then(function (rows) {
-        var features = [];
-        for (var i = 0; i < rows.length; i++) {
-          var row = rows[i];
-          var coords = Array.isArray(row.coords) ? row.coords : [];
-          if (coords.length < 3) continue;
-          // Ensure ring is closed
-          var ring = coords.map(function(c) { return [c[0], c[1]]; });
-          if (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1]) {
-            ring.push(ring[0]);
-          }
-          features.push({
-            type: 'Feature',
-            geometry: { type: 'Polygon', coordinates: [ring] },
-            properties: { height: row.height_m || 10.0 },
-          });
-        }
-        backendBuildings = { type: 'FeatureCollection', features: features };
-        postToRN({ type: 'STATUS', buildingCount: features.length, sunAlt: 0, sunAz: 0 });
-        if (mapLoaded) scheduleShadowUpdate(0);
-      })
-      .catch(function (e) {
-        postToRN({ type: 'WARNING', message: 'Could not load buildings from backend, using map tiles' });
-        backendBuildings = [];  // mark as failed so we fall back
-        if (mapLoaded) scheduleShadowUpdate(0);
-      });
-  }
-
-  function getBuildings() {
-    if (backendBuildings && backendBuildings.features && backendBuildings.features.length > 0) {
-      var bounds = map.getBounds();
-      var padLng = (bounds.getEast() - bounds.getWest()) * 0.75;
-      var padLat = (bounds.getNorth() - bounds.getSouth()) * 0.75;
-      var minLng = bounds.getWest() - padLng;
-      var maxLng = bounds.getEast() + padLng;
-      var minLat = bounds.getSouth() - padLat;
-      var maxLat = bounds.getNorth() + padLat;
-      var filtered = backendBuildings.features.filter(function(f) {
-        var coords = f.geometry.coordinates[0];
-        return coords.some(function(p) {
-          return p[0] >= minLng && p[0] <= maxLng && p[1] >= minLat && p[1] <= maxLat;
-        });
-      });
-      return { type: 'FeatureCollection', features: filtered };
-    }
-    return queryBuildings();
-  }
-
-  /* ── Building data from rendered features (fallback) ────────────────────── */
+  /* ── Building data from rendered features (instant, same as what's visible) */
   function getPaddedQueryBox() {
     var c = map.getContainer();
     var w = c.clientWidth;
@@ -293,16 +239,11 @@ export const MAP_HTML = `<!DOCTYPE html>
 
     var raw;
     try {
-      /* Use the layer IDs discovered from the style at load time so we never
-         depend on hardcoded names that differ between map styles. */
       var opts = buildingLayerIds.length ? { layers: buildingLayerIds } : {};
       raw = map.queryRenderedFeatures(getPaddedQueryBox(), opts);
-      // Some MapLibre builds only return rendered features inside the viewport
-      // and may yield an empty result for off-screen query boxes.
       if (!raw.length) {
         raw = map.queryRenderedFeatures(undefined, opts);
       }
-      /* If no layer filter was possible, keep only features from source-layer 'building'. */
       if (!buildingLayerIds.length) {
         raw = raw.filter(function (f) { return f.sourceLayer === 'building'; });
       }
@@ -646,11 +587,11 @@ export const MAP_HTML = `<!DOCTYPE html>
                     geoRing[0][1] === geoRing[geoRing.length - 1][1])
           ? geoRing.slice(0, -1)
           : geoRing;
-        if (open.length < 3) return;
+        if (open.length < 3) continue;
 
         var proj = open.map(function (p) { return [p[0] + dLon, p[1] + dLat]; });
         var hull = convexHull(open.concat(proj));
-        if (hull.length < 4) return;
+        if (hull.length < 4) continue;
 
         var simpleHull = simplifyClosedRing(hull, maxPoints);
         features.push({
@@ -743,7 +684,7 @@ export const MAP_HTML = `<!DOCTYPE html>
     try {
       ensureShadowLayer();
 
-      var buildings = getBuildings();
+      var buildings = queryBuildings();
       var center = map.getCenter();
       var sun = getSunPos(currentDate, center.lat, center.lng);
       var zoom = map.getZoom();
@@ -859,7 +800,8 @@ export const MAP_HTML = `<!DOCTYPE html>
       })
       .map(function (l) { return l.id; });
 
-    // Buildings should be fully opaque.
+
+    // Buildings should be fully opaque and render from zoom 14.
     buildingLayerIds.forEach(function (id) {
       try {
         var layer = map.getLayer(id);
@@ -869,6 +811,8 @@ export const MAP_HTML = `<!DOCTYPE html>
         } else if (layer.type === 'fill') {
           map.setPaintProperty(id, 'fill-opacity', 1);
         }
+        // Lower minzoom so buildings are queryable at all zoom levels the app allows
+        map.setLayerZoomRange(id, 14, 24);
       } catch (_) {}
     });
 
@@ -911,8 +855,6 @@ export const MAP_HTML = `<!DOCTYPE html>
 
     mapLoaded = true;
     renderCafeMarkers();
-    // Fetch backend buildings before first shadow update
-    fetchBackendBuildings();
     setTimeout(function () { scheduleShadowUpdate(0); }, 250);
     postToRN({ type: 'MAP_READY' });
   });
@@ -920,6 +862,10 @@ export const MAP_HTML = `<!DOCTYPE html>
   map.on('moveend', function () {
     scheduleShadowUpdate(90);
     renderCafeMarkers();
+  });
+
+  map.on('zoomend', function () {
+    scheduleShadowUpdate(90);
   });
 
   /* ── Message bridge: RN → WebView ────────────────────────────────────────── */
