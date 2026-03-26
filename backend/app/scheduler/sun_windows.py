@@ -113,16 +113,29 @@ out geom tags;
 # ---------------------------------------------------------------------------
 
 async def load_buildings_from_db() -> list[dict]:
-    """Load all buildings from the DB. Returns list of {coords, height_m}."""
+    """Load all buildings from DB with pagination (PostgREST default limit is 1000 rows)."""
     supabase = get_service_client()
-    res = supabase.table("buildings").select("coords, height_m").execute()
     buildings = []
-    for row in res.data:
-        coords = row["coords"]
-        # coords stored as JSON array of [lon, lat] pairs
-        if isinstance(coords, str):
-            coords = json.loads(coords)
-        buildings.append({"coords": [tuple(c) for c in coords], "height_m": row["height_m"]})
+    page_size = 1000
+    offset = 0
+
+    while True:
+        res = (
+            supabase.table("buildings")
+            .select("coords, height_m")
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        rows = res.data
+        for row in rows:
+            coords = row["coords"]
+            if isinstance(coords, str):
+                coords = json.loads(coords)
+            buildings.append({"coords": [tuple(c) for c in coords], "height_m": row["height_m"]})
+        if len(rows) < page_size:
+            break
+        offset += page_size
+
     logger.info(f"Loaded {len(buildings)} buildings from DB")
     return buildings
 
@@ -236,8 +249,15 @@ async def compute_all_sun_windows(target_date: date | None = None) -> None:
     logger.info(f"=== Starting sun window computation for {target_date} ===")
 
     supabase = get_service_client()
-    cafes_res = supabase.table("cafes").select("id, lat, lng").execute()
-    cafes: list[dict] = cafes_res.data
+    cafes: list[dict] = []
+    page_size = 1000
+    offset = 0
+    while True:
+        res = supabase.table("cafes").select("id, lat, lng").range(offset, offset + page_size - 1).execute()
+        cafes.extend(res.data)
+        if len(res.data) < page_size:
+            break
+        offset += page_size
     if not cafes:
         logger.warning("No cafes in DB — run cafe sync first")
         return
