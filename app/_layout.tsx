@@ -6,8 +6,9 @@ import React, { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import 'react-native-reanimated';
 
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useColorScheme } from 'react-native';
 import { Onboarding } from '@/src/components/onboarding';
+import { CafeDataProvider } from '@/src/context/cafe-data-context';
 
 const ONBOARDING_KEY = 'onboarding_complete';
 
@@ -37,18 +38,19 @@ export default function RootLayout() {
   if (onboardingDone === null) return null;
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-      </Stack>
-      <StatusBar style="dark" />
+    <CafeDataProvider>
+      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+        <Stack>
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        </Stack>
+        <StatusBar style="dark" />
 
-      {!onboardingDone && (
-        <View style={{ position: 'absolute', inset: 0 } as any}>
-          <Onboarding onComplete={handleOnboardingComplete} />
-        </View>
-      )}
-    </ThemeProvider>
+        {!onboardingDone && (
+          <View style={{ position: 'absolute', inset: 0 } as any}>
+            <Onboarding onComplete={handleOnboardingComplete} />
+          </View>
+        )}
+      </ThemeProvider>
+    </CafeDataProvider>
   );
 }

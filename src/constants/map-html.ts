@@ -42,6 +42,71 @@ export const MAP_HTML = `<!DOCTYPE html>
       pointer-events: none;
       transition: opacity 0.12s linear;
     }
+    .cafe-pin {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      transform: translateY(-6px);
+      pointer-events: auto;
+      cursor: pointer;
+    }
+    .cafe-bubble {
+      background: #fff;
+      border-radius: 16px;
+      padding: 5px 10px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #1c1b19;
+      box-shadow: 0 3px 12px rgba(0, 0, 0, 0.12);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+      max-width: 150px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .cafe-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #f5a623;
+      box-shadow: 0 0 4px rgba(245, 166, 35, 0.6);
+      flex-shrink: 0;
+    }
+    .cafe-dot.shade {
+      background: #63605c;
+      box-shadow: 0 0 3px rgba(28, 27, 25, 0.35);
+    }
+    .cafe-tail {
+      width: 2px;
+      height: 6px;
+      border-radius: 1px;
+      background: #1c1b19;
+      opacity: 0.2;
+      margin-top: 1px;
+    }
+    .cafe-bubble.sel {
+      background: #1c1b19;
+      color: #fff;
+    }
+    .cafe-tail.sel {
+      opacity: 1;
+    }
+    .cafe-dot-pin.sel {
+      box-shadow: 0 0 0 3px #1c1b19, 0 1px 4px rgba(0,0,0,0.2);
+    }
+    .cafe-dot-pin {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #f5a623;
+      box-shadow: 0 0 0 2px rgba(255,255,255,0.85), 0 1px 4px rgba(0,0,0,0.2);
+    }
+    .cafe-dot-pin.shade {
+      background: #8a8680;
+      box-shadow: 0 0 0 2px rgba(255,255,255,0.85), 0 1px 4px rgba(0,0,0,0.15);
+    }
 
   </style>
 </head>
@@ -75,8 +140,11 @@ export const MAP_HTML = `<!DOCTYPE html>
   var SHADOW_OPACITY_FAST = 0.30;
   var MAX_SHADOW_RING_POINTS = 28;
   var MAX_SHADOW_RING_POINTS_SCRUB = 12;
-  var MAX_SHADOW_FEATURES_SCRUB = 700;
   var SCRUB_UPDATE_INTERVAL_MS = 70;
+  var CAFE_SOURCE_ID = 'osm-cafes';
+  var MAX_VISIBLE_CAFE_MARKERS = 140;
+  var CAFE_HIDE_ZOOM = 13;
+  var CAFE_DOT_ONLY_ZOOM = 16;
 
   /* ── state ──────────────────────────────────────────────────────────────── */
   var currentDate      = new Date();
@@ -88,7 +156,11 @@ export const MAP_HTML = `<!DOCTYPE html>
   var shadowUpdateInFlight = false;
   var shadowUpdateQueued = false;
   var isScrubbing = false;
+  var selectedCafeId = null;
   var nightOverlay = document.getElementById('night-overlay');
+  var cafeFeatures = [];
+  var cafeMarkers = [];
+  var lastCafeSunById = {};
 
   /* ── Inline sun position (fallback when SunCalc CDN fails) ─────────────── */
   function calcSunPos(date, latDeg, lonDeg) {
@@ -264,6 +336,205 @@ export const MAP_HTML = `<!DOCTYPE html>
 
   function emptyShadowCollection() {
     return { type: 'FeatureCollection', features: [] };
+  }
+
+  function emptyCafeCollection() {
+    return { type: 'FeatureCollection', features: [] };
+  }
+
+  function ensureCafeSource() {
+    if (!map.getSource(CAFE_SOURCE_ID)) {
+      map.addSource(CAFE_SOURCE_ID, {
+        type: 'geojson',
+        data: emptyCafeCollection(),
+      });
+    }
+  }
+
+  function clearCafeMarkers() {
+    for (var i = 0; i < cafeMarkers.length; i++) {
+      try { cafeMarkers[i].remove(); } catch (_) {}
+    }
+    cafeMarkers = [];
+  }
+
+  function handleCafeClick(props) {
+    selectedCafeId = props.id;
+    renderCafeMarkers();
+    postToRN({
+      type: 'CAFE_SELECTED',
+      id: props.id,
+      name: props.name,
+      lat: props.lat,
+      lng: props.lng,
+      area: props.area,
+      inSunNow: props.inSunNow,
+      distanceMeters: props.distanceMeters,
+      distanceKm: props.distanceKm,
+    });
+  }
+
+  function createCafeMarkerElement(props, dotOnly) {
+    var name = (props && props.name) || 'Cafe';
+    var inSunNow = props && props.inSunNow;
+    var isSelected = props && props.id && props.id === selectedCafeId;
+
+    if (dotOnly) {
+      var el = document.createElement('div');
+      el.className = 'cafe-dot-pin' + (inSunNow === false ? ' shade' : '') + (isSelected ? ' sel' : '');
+      var _props = props;
+      el.addEventListener('click', function(e) { e.stopPropagation(); handleCafeClick(_props); });
+      return el;
+    }
+
+    var wrap = document.createElement('div');
+    wrap.className = 'cafe-pin';
+    var _props = props;
+    wrap.addEventListener('click', function(e) { e.stopPropagation(); handleCafeClick(_props); });
+
+    var bubble = document.createElement('div');
+    bubble.className = 'cafe-bubble' + (isSelected ? ' sel' : '');
+
+    var dot = document.createElement('span');
+    dot.className = 'cafe-dot';
+    if (inSunNow === false) {
+      dot.className += ' shade';
+    }
+    bubble.appendChild(dot);
+    bubble.appendChild(document.createTextNode(name || 'Cafe'));
+
+    var tail = document.createElement('div');
+    tail.className = 'cafe-tail' + (isSelected ? ' sel' : '');
+
+    wrap.appendChild(bubble);
+    wrap.appendChild(tail);
+    return wrap;
+  }
+
+  function renderCafeMarkers() {
+    if (!mapLoaded || !cafeFeatures.length) return;
+    clearCafeMarkers();
+    var zoom = map.getZoom();
+    if (zoom < CAFE_HIDE_ZOOM) return;
+    var dotOnly = zoom < CAFE_DOT_ONLY_ZOOM;
+    var bounds = map.getBounds();
+    var visible = 0;
+
+    for (var i = 0; i < cafeFeatures.length; i++) {
+      if (visible >= MAX_VISIBLE_CAFE_MARKERS) break;
+      var f = cafeFeatures[i];
+      var c = f.geometry && f.geometry.coordinates;
+      if (!c || c.length < 2) continue;
+      if (!bounds.contains([c[0], c[1]])) continue;
+
+      var el = createCafeMarkerElement(f.properties || {}, dotOnly);
+      var anchor = dotOnly ? 'center' : 'bottom';
+      var marker = new maplibregl.Marker({ element: el, anchor: anchor })
+        .setLngLat([c[0], c[1]])
+        .addTo(map);
+      cafeMarkers.push(marker);
+      visible++;
+    }
+  }
+
+  function setCafeData(cafes) {
+    var list = Array.isArray(cafes) ? cafes : [];
+    var features = [];
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i] || {};
+      if (typeof c.lng !== 'number' || typeof c.lat !== 'number') continue;
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [c.lng, c.lat] },
+        properties: {
+          id: c.id || '',
+          name: c.name || 'Cafe',
+          area: c.area || '',
+          inSunNow: c.metadata && typeof c.metadata.inSunNow === 'boolean'
+            ? c.metadata.inSunNow
+            : true,
+          distanceMeters: c.metadata && typeof c.metadata.distanceMeters === 'number' ? c.metadata.distanceMeters : null,
+          distanceKm: c.metadata && typeof c.metadata.distanceKm === 'number' ? c.metadata.distanceKm : null,
+          lat: c.lat,
+          lng: c.lng,
+        },
+      });
+    }
+
+    cafeFeatures = features;
+    var src = map.getSource(CAFE_SOURCE_ID);
+    if (src) {
+      src.setData({ type: 'FeatureCollection', features: features });
+    }
+    renderCafeMarkers();
+    if (mapLoaded) {
+      scheduleShadowUpdate(0);
+    }
+  }
+
+  function pointInRing(lng, lat, ring) {
+    if (!Array.isArray(ring) || ring.length < 3) return false;
+    var inside = false;
+    for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      var xi = ring[i][0], yi = ring[i][1];
+      var xj = ring[j][0], yj = ring[j][1];
+      var intersects = ((yi > lat) !== (yj > lat)) &&
+        (lng < ((xj - xi) * (lat - yi)) / ((yj - yi) || 1e-12) + xi);
+      if (intersects) inside = !inside;
+    }
+    return inside;
+  }
+
+  function pointInPolygonCoords(lng, lat, coords) {
+    if (!Array.isArray(coords) || !coords.length) return false;
+    if (!pointInRing(lng, lat, coords[0])) return false;
+    for (var i = 1; i < coords.length; i++) {
+      if (pointInRing(lng, lat, coords[i])) return false;
+    }
+    return true;
+  }
+
+  function isPointInShadow(lng, lat, shadowFC) {
+    if (!shadowFC || !Array.isArray(shadowFC.features)) return false;
+    for (var i = 0; i < shadowFC.features.length; i++) {
+      var geom = shadowFC.features[i] && shadowFC.features[i].geometry;
+      if (!geom || !geom.coordinates) continue;
+      if (geom.type === 'Polygon') {
+        if (pointInPolygonCoords(lng, lat, geom.coordinates)) return true;
+      } else if (geom.type === 'MultiPolygon') {
+        var polys = geom.coordinates;
+        for (var j = 0; j < polys.length; j++) {
+          if (pointInPolygonCoords(lng, lat, polys[j])) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function emitCafeSunStatus(shadowFC, sunAltitude) {
+    if (!cafeFeatures.length) return;
+    var sunAboveHorizon = sunAltitude >= MIN_SUN_ALT_RAD;
+    var statuses = [];
+    var nextById = {};
+    var changed = false;
+
+    for (var i = 0; i < cafeFeatures.length; i++) {
+      var f = cafeFeatures[i];
+      var c = f.geometry && f.geometry.coordinates;
+      var id = f.properties && f.properties.id;
+      if (!id || !c || c.length < 2) continue;
+
+      var inSun = sunAboveHorizon && !isPointInShadow(c[0], c[1], shadowFC);
+      nextById[id] = inSun;
+      statuses.push({ id: id, inSun: inSun });
+      if (lastCafeSunById[id] !== inSun) changed = true;
+    }
+
+    if (!changed && Object.keys(lastCafeSunById).length === statuses.length) {
+      return;
+    }
+    lastCafeSunById = nextById;
+    postToRN({ type: 'CAFE_SUN_STATUS', statuses: statuses });
   }
 
   function ensureShadowLayer() {
@@ -443,18 +714,12 @@ export const MAP_HTML = `<!DOCTYPE html>
         sun,
         center.lat,
         isScrubbing
-          ? { maxPoints: MAX_SHADOW_RING_POINTS_SCRUB, maxFeatures: MAX_SHADOW_FEATURES_SCRUB }
+          ? { maxPoints: MAX_SHADOW_RING_POINTS_SCRUB }
           : undefined,
       );
-      var useDissolve =
-        !isScrubbing &&
-        zoom >= DISSOLVE_MIN_ZOOM &&
-        rawShadowData.features.length > 0 &&
-        rawShadowData.features.length <= MAX_DISSOLVE_FEATURES;
-
-      var shadowData = useDissolve ? dissolveShadows(rawShadowData) : rawShadowData;
+      emitCafeSunStatus(rawShadowData, sun.altitude);
       var src = map.getSource(SHADOW_SOURCE_ID);
-      if (src) src.setData(shadowData);
+      if (src) src.setData(rawShadowData);
       if (nightOverlay) {
         var isNight = sun.altitude < MIN_SUN_ALT_RAD;
         nightOverlay.style.opacity =
@@ -464,7 +729,7 @@ export const MAP_HTML = `<!DOCTYPE html>
         map.setPaintProperty(
           SHADOW_LAYER_ID,
           'fill-opacity',
-          shadowsEnabled ? (useDissolve ? SHADOW_OPACITY : SHADOW_OPACITY_FAST) : 0
+          shadowsEnabled ? SHADOW_OPACITY_FAST : 0
         );
       }
 
@@ -563,6 +828,13 @@ export const MAP_HTML = `<!DOCTYPE html>
     });
 
     ensureShadowLayer();
+    ensureCafeSource();
+    if (cafeFeatures.length) {
+      var cafeSrc = map.getSource(CAFE_SOURCE_ID);
+      if (cafeSrc) {
+        cafeSrc.setData({ type: 'FeatureCollection', features: cafeFeatures });
+      }
+    }
 
     // User location dot
     map.addSource('user-location', {
@@ -583,11 +855,15 @@ export const MAP_HTML = `<!DOCTYPE html>
     });
 
     mapLoaded = true;
+    renderCafeMarkers();
     setTimeout(function () { scheduleShadowUpdate(0); }, 250);
     postToRN({ type: 'MAP_READY' });
   });
 
-  map.on('moveend', function () { scheduleShadowUpdate(90); });
+  map.on('moveend', function () {
+    scheduleShadowUpdate(90);
+    renderCafeMarkers();
+  });
 
   /* ── Message bridge: RN → WebView ────────────────────────────────────────── */
 
@@ -604,6 +880,10 @@ export const MAP_HTML = `<!DOCTYPE html>
         case 'SET_DATE':
           currentDate = new Date(msg.date);
           scheduleShadowUpdate(isScrubbing ? SCRUB_UPDATE_INTERVAL_MS : 0);
+          break;
+
+        case 'SET_CAFES':
+          setCafeData(msg.cafes);
           break;
 
         case 'SET_SHADOWS':
@@ -626,6 +906,11 @@ export const MAP_HTML = `<!DOCTYPE html>
         case 'SCRUB_END':
           isScrubbing = false;
           scheduleShadowUpdate(0);
+          break;
+
+        case 'CAFE_DESELECTED':
+          selectedCafeId = null;
+          renderCafeMarkers();
           break;
 
         case 'SET_LOCATION': {

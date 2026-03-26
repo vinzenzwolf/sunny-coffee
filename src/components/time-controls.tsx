@@ -13,35 +13,42 @@ interface TimeControlsProps {
   buildingCount: number;
   isLoading: boolean;
   bottom: number;
+  sunriseMinutes: number;
+  sunsetMinutes: number;
   onDateChange: (newDate: Date) => void;
   onScrubStart?: () => void;
   onScrubEnd?: () => void;
 }
 
-const TICK_HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
+const ALL_TICK_HOURS = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21];
 
 function padTwo(n: number): string {
   return n.toString().padStart(2, '0');
 }
 
-function formatTime(date: Date): string {
-  return `${padTwo(date.getHours())}:${padTwo(date.getMinutes())}`;
+function minutesToTimeString(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${padTwo(h)}:${padTwo(m)}`;
 }
 
-function sliderXToMinutes(fraction: number): number {
-  return Math.round(Math.min(Math.max(fraction, 0), 1) * 1439);
+function sliderXToMinutes(fraction: number, sunriseMin: number, sunsetMin: number): number {
+  const clamped = Math.min(Math.max(fraction, 0), 1);
+  return Math.round(sunriseMin + clamped * (sunsetMin - sunriseMin));
 }
 
 export function TimeControls({
   date,
   bottom,
+  sunriseMinutes,
+  sunsetMinutes,
   onDateChange,
   onScrubStart,
   onScrubEnd,
 }: TimeControlsProps) {
   const sliderWidth = useRef(0);
   const lastSliderMinutes = useRef<number | null>(null);
-  const lastSentAtMs = useRef(0);
+  const scrubMinutesRef = useRef<number | null>(null);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [scrubMinutes, setScrubMinutes] = useState<number | null>(null);
 
@@ -53,25 +60,31 @@ export function TimeControls({
     (e: GestureResponderEvent) => {
       if (sliderWidth.current === 0) return;
       const fraction = e.nativeEvent.locationX / sliderWidth.current;
-      const minutes = sliderXToMinutes(fraction);
+      if (!isFinite(fraction)) return;
+      const minutes = sliderXToMinutes(fraction, sunriseMinutes, sunsetMinutes);
+      if (!isFinite(minutes)) return;
       if (lastSliderMinutes.current === minutes) return;
       lastSliderMinutes.current = minutes;
+      scrubMinutesRef.current = minutes;
       setScrubMinutes(minutes);
 
       const next = new Date(date);
       next.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
-      const now = Date.now();
-      if (now - lastSentAtMs.current >= 40) {
-        lastSentAtMs.current = now;
-        onDateChange(next);
-      }
+      if (!isFinite(next.getTime())) return;
+      onDateChange(next);
     },
-    [date, onDateChange],
+    [date, sunriseMinutes, sunsetMinutes, onDateChange],
   );
 
-  const displayedMinutes = scrubMinutes ?? (date.getHours() * 60 + date.getMinutes());
-  const dayFraction = displayedMinutes / 1439;
+  const rawMinutes = isFinite(date.getTime()) ? date.getHours() * 60 + date.getMinutes() : sunriseMinutes;
+  const displayedMinutes = scrubMinutes ?? Math.min(Math.max(rawMinutes, sunriseMinutes), sunsetMinutes);
+  const range = sunsetMinutes - sunriseMinutes;
+  const dayFraction = range > 0 ? (displayedMinutes - sunriseMinutes) / range : 0;
   const displayedHour = Math.floor(displayedMinutes / 60);
+
+  const tickHours = ALL_TICK_HOURS.filter(
+    (h) => h * 60 >= sunriseMinutes && h * 60 <= sunsetMinutes,
+  );
 
   return (
     <View style={[styles.container, { bottom }]}>
@@ -80,7 +93,7 @@ export function TimeControls({
         <Text style={styles.label}>Sun position</Text>
         <View style={styles.val}>
           <View style={styles.dot} />
-          <Text style={styles.time}>{formatTime(date)}</Text>
+          <Text style={styles.time}>{minutesToTimeString(displayedMinutes)}</Text>
         </View>
       </View>
 
@@ -98,26 +111,27 @@ export function TimeControls({
         }}
         onResponderMove={handleSliderTouch}
         onResponderRelease={() => {
-          if (scrubMinutes !== null) {
+          const finalMinutes = scrubMinutesRef.current;
+          if (finalMinutes !== null && isFinite(finalMinutes)) {
             const next = new Date(date);
-            next.setHours(Math.floor(scrubMinutes / 60), scrubMinutes % 60, 0, 0);
-            onDateChange(next);
+            next.setHours(Math.floor(finalMinutes / 60), finalMinutes % 60, 0, 0);
+            if (isFinite(next.getTime())) onDateChange(next);
           }
+          scrubMinutesRef.current = null;
           setIsScrubbing(false);
           setScrubMinutes(null);
           lastSliderMinutes.current = null;
-          lastSentAtMs.current = 0;
           onScrubEnd?.();
         }}
         onResponderTerminate={() => {
+          scrubMinutesRef.current = null;
           setIsScrubbing(false);
           setScrubMinutes(null);
           lastSliderMinutes.current = null;
-          lastSentAtMs.current = 0;
           onScrubEnd?.();
         }}
       >
-        <View style={styles.track}>
+        <View style={styles.track} pointerEvents="none">
           <View style={[styles.fill, { width: `${dayFraction * 100}%` as `${number}%` }]} />
           <View
             style={[
@@ -129,11 +143,21 @@ export function TimeControls({
         </View>
 
         <View style={styles.ticks} pointerEvents="none">
-          {TICK_HOURS.map((h) => (
-            <Text key={h} style={[styles.tick, displayedHour === h && styles.tickActive]}>
-              {h}
-            </Text>
-          ))}
+          {tickHours.map((h) => {
+            const tickFraction = range > 0 ? (h * 60 - sunriseMinutes) / range : 0;
+            return (
+              <Text
+                key={h}
+                style={[
+                  styles.tick,
+                  displayedHour === h && styles.tickActive,
+                  { left: `${tickFraction * 100}%` as `${number}%` },
+                ]}
+              >
+                {h}
+              </Text>
+            );
+          })}
         </View>
       </View>
     </View>
@@ -244,15 +268,17 @@ const styles = StyleSheet.create({
     transform: [{ scale: 1.15 }],
   },
   ticks: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    position: 'relative',
+    height: 14,
     marginTop: 7,
   },
   tick: {
+    position: 'absolute',
     fontSize: 9,
     color: '#D8D4CF',
     fontWeight: '500',
-    flex: 1,
+    width: 20,
+    marginLeft: -10,
     textAlign: 'center',
   },
   tickActive: {

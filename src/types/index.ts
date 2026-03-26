@@ -93,3 +93,30 @@ export interface ToastMessage {
   message: string;
   level: ToastLevel;
 }
+
+// ---------------------------------------------------------------------------
+// Cafes
+// ---------------------------------------------------------------------------
+
+export interface CafeMetadata {
+  cuisine?: string;
+  openingHours?: string;
+  website?: string;
+  sourceType?: 'node' | 'way' | 'relation';
+  distanceMeters?: number;
+  distanceKm?: number;
+  distanceUpdatedAt?: number;
+  distanceFrom?: { lat: number; lng: number };
+  inSunNow?: boolean;
+  sunStatusUpdatedAt?: number;
+  rawTags?: Record<string, string>;
+}
+
+export interface Cafe {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  area?: string;
+  metadata?: CafeMetadata;
+}
