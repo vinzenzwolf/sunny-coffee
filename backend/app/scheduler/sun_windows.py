@@ -18,8 +18,9 @@ from typing import Any
 
 import httpx
 from pysolar.solar import get_altitude, get_azimuth
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Point, Polygon, box as shapely_box
 from shapely.ops import unary_union
+from shapely.strtree import STRtree
 
 from app.db import get_pool, get_service_client
 
@@ -171,28 +172,33 @@ def project_shadow(building_coords: list[tuple], height_m: float,
 # Per-cafe sun window
 # ---------------------------------------------------------------------------
 
+def _build_spatial_index(buildings: list[dict]) -> STRtree:
+    """Build an R-tree over building bounding boxes for fast proximity queries."""
+    geoms = []
+    for b in buildings:
+        lons = [c[0] for c in b["coords"]]
+        lats = [c[1] for c in b["coords"]]
+        geoms.append(shapely_box(min(lons), min(lats), max(lons), max(lats)))
+    return STRtree(geoms)
+
+
 def _nearby_buildings(cafe_lat: float, cafe_lng: float,
-                      buildings: list[dict]) -> list[dict]:
-    # Radius must cover MAX_SHADOW_LENGTH_M (400m) in all directions so that
-    # buildings casting long shadows at low sun angles are not excluded.
-    # 400m in degrees: ~0.0036 lat, ~0.0065 lon at Copenhagen (lat 55.6°)
-    radius_lat = MAX_SHADOW_LENGTH_M / EARTH_CIRC_M          # ~0.0036°
-    radius_lng = MAX_SHADOW_LENGTH_M / (EARTH_CIRC_M * cos(radians(cafe_lat)))  # ~0.0064°
-    return [
-        b for b in buildings
-        if any(
-            abs(lon - cafe_lng) < radius_lng and abs(lat - cafe_lat) < radius_lat
-            for lon, lat in b["coords"]
-        )
-    ]
+                      buildings: list[dict], tree: STRtree) -> list[dict]:
+    radius_lat = MAX_SHADOW_LENGTH_M / EARTH_CIRC_M
+    radius_lng = MAX_SHADOW_LENGTH_M / (EARTH_CIRC_M * cos(radians(cafe_lat)))
+    query_box = shapely_box(
+        cafe_lng - radius_lng, cafe_lat - radius_lat,
+        cafe_lng + radius_lng, cafe_lat + radius_lat,
+    )
+    return [buildings[i] for i in tree.query(query_box)]
 
 
 def compute_sun_window_for_cafe(
     cafe_lat: float, cafe_lng: float,
-    buildings: list[dict], target_date: date,
+    buildings: list[dict], tree: STRtree, target_date: date,
 ) -> list[dict]:
     point = Point(cafe_lng, cafe_lat)
-    nearby = _nearby_buildings(cafe_lat, cafe_lng, buildings)
+    nearby = _nearby_buildings(cafe_lat, cafe_lng, buildings, tree)
     total_slots = (24 * 60) // SLOT_MINUTES
     in_sun = []
 
@@ -253,7 +259,7 @@ async def compute_all_sun_windows(target_date: date | None = None) -> None:
     page_size = 1000
     offset = 0
     while True:
-        res = supabase.table("cafes").select("id, lat, lng").range(offset, offset + page_size - 1).execute()
+        res = supabase.table("cafes").select("id, lat, lng, name").range(offset, offset + page_size - 1).execute()
         cafes.extend(res.data)
         if len(res.data) < page_size:
             break
@@ -268,17 +274,20 @@ async def compute_all_sun_windows(target_date: date | None = None) -> None:
         logger.warning("No buildings in DB — run building sync first")
         return
 
+    logger.info("Building spatial index...")
+    tree = await asyncio.to_thread(_build_spatial_index, buildings)
+    logger.info("Spatial index ready")
+
     completed = 0
 
     async def process(cafe: dict[str, Any]) -> dict:
         nonlocal completed
         intervals = await asyncio.to_thread(
             compute_sun_window_for_cafe,
-            cafe["lat"], cafe["lng"], buildings, target_date,
+            cafe["lat"], cafe["lng"], buildings, tree, target_date,
         )
         completed += 1
-        if completed % 50 == 0 or completed == len(cafes):
-            logger.info(f"Progress: {completed}/{len(cafes)} cafes computed")
+        logger.info(f"[{completed}/{len(cafes)}] {cafe.get('name', cafe['id'])}")
         return {"cafe_id": cafe["id"], "date": str(target_date), "intervals": intervals}
 
     logger.info(f"Computing {(24 * 60) // SLOT_MINUTES} time slots per cafe...")
