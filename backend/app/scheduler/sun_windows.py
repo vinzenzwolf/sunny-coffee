@@ -159,11 +159,16 @@ def project_shadow(building_coords: list[tuple], height_m: float,
 # ---------------------------------------------------------------------------
 
 def _nearby_buildings(cafe_lat: float, cafe_lng: float,
-                      buildings: list[dict], radius_deg: float = 0.0015) -> list[dict]:
+                      buildings: list[dict]) -> list[dict]:
+    # Radius must cover MAX_SHADOW_LENGTH_M (400m) in all directions so that
+    # buildings casting long shadows at low sun angles are not excluded.
+    # 400m in degrees: ~0.0036 lat, ~0.0065 lon at Copenhagen (lat 55.6°)
+    radius_lat = MAX_SHADOW_LENGTH_M / EARTH_CIRC_M          # ~0.0036°
+    radius_lng = MAX_SHADOW_LENGTH_M / (EARTH_CIRC_M * cos(radians(cafe_lat)))  # ~0.0064°
     return [
         b for b in buildings
         if any(
-            abs(lon - cafe_lng) < radius_deg and abs(lat - cafe_lat) < radius_deg
+            abs(lon - cafe_lng) < radius_lng and abs(lat - cafe_lat) < radius_lat
             for lon, lat in b["coords"]
         )
     ]
