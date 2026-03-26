@@ -24,6 +24,10 @@ cd "$SCRIPT_DIR"
 echo "Starting sun window computation..."
 echo "Log: $LOG_FILE"
 
+# Copy the runner script into the container (needed if image predates this file)
+CONTAINER_ID="$(docker compose ps -q api)"
+docker cp "$SCRIPT_DIR/app/compute_now.py" "${CONTAINER_ID}:/app/app/compute_now.py"
+
 nohup docker compose exec -T api python app/compute_now.py \
     > "$LOG_FILE" 2>&1 &
 
