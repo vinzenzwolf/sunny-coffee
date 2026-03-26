@@ -228,7 +228,7 @@ async def compute_all_sun_windows(target_date: date | None = None) -> None:
     if target_date is None:
         target_date = date.today()
 
-    logger.info(f"Computing sun windows for {target_date}")
+    logger.info(f"=== Starting sun window computation for {target_date} ===")
 
     supabase = get_service_client()
     cafes_res = supabase.table("cafes").select("id, lat, lng").execute()
@@ -236,21 +236,30 @@ async def compute_all_sun_windows(target_date: date | None = None) -> None:
     if not cafes:
         logger.warning("No cafes in DB — run cafe sync first")
         return
+    logger.info(f"Loaded {len(cafes)} cafes from DB")
 
     buildings = await load_buildings_from_db()
     if not buildings:
         logger.warning("No buildings in DB — run building sync first")
         return
 
+    completed = 0
+
     async def process(cafe: dict[str, Any]) -> dict:
+        nonlocal completed
         intervals = await asyncio.to_thread(
             compute_sun_window_for_cafe,
             cafe["lat"], cafe["lng"], buildings, target_date,
         )
+        completed += 1
+        if completed % 50 == 0 or completed == len(cafes):
+            logger.info(f"Progress: {completed}/{len(cafes)} cafes computed")
         return {"cafe_id": cafe["id"], "date": str(target_date), "intervals": intervals}
 
+    logger.info(f"Computing {(24 * 60) // SLOT_MINUTES} time slots per cafe...")
     results = await asyncio.gather(*[process(c) for c in cafes])
 
+    logger.info(f"Upserting {len(results)} sun windows to DB...")
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.executemany(
@@ -263,7 +272,7 @@ async def compute_all_sun_windows(target_date: date | None = None) -> None:
             """,
             [(r["cafe_id"], target_date, json.dumps(r["intervals"])) for r in results],
         )
-    logger.info(f"Upserted sun windows for {len(results)} cafes")
+    logger.info(f"=== Done. Upserted sun windows for {len(results)} cafes ===")
 
 
 # ---------------------------------------------------------------------------
