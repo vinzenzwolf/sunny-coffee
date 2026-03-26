@@ -28,7 +28,7 @@ echo "Log: $LOG_FILE"
 CONTAINER_ID="$(docker compose ps -q api)"
 docker cp "$SCRIPT_DIR/app/compute_now.py" "${CONTAINER_ID}:/app/app/compute_now.py"
 
-nohup docker compose exec -T api python app/compute_now.py \
+nohup docker compose exec -T api python -m app.compute_now \
     > "$LOG_FILE" 2>&1 &
 
 PID=$!
