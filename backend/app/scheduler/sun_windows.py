@@ -261,7 +261,7 @@ async def compute_all_sun_windows(target_date: date | None = None) -> None:
               SET intervals = excluded.intervals,
                   computed_at = excluded.computed_at
             """,
-            [(r["cafe_id"], r["date"], json.dumps(r["intervals"])) for r in results],
+            [(r["cafe_id"], target_date, json.dumps(r["intervals"])) for r in results],
         )
     logger.info(f"Upserted sun windows for {len(results)} cafes")
 
