@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Point Relocator — sunny-coffee</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Top nav bar ────────────────────────────────────────── */
+    #topbar {
+      height: 52px;
+      flex-shrink: 0;
+      background: #1a1d27;
+      border-bottom: 1px solid #2d3148;
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 12px;
+      z-index: 2000;
+    }
+
+    #topbar h1 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #f8fafc;
+      white-space: nowrap;
+    }
+
+    #topbar-divider {
+      width: 1px;
+      height: 20px;
+      background: #2d3148;
+    }
+
+    /* Progress bar */
+    #progress-wrap {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    #progress-label {
+      font-size: 11px;
+      color: #64748b;
+      white-space: nowrap;
+    }
+
+    #progress-bar-track {
+      height: 4px;
+      background: #2d3148;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    #progress-bar-fill {
+      height: 100%;
+      background: #22c55e;
+      border-radius: 2px;
+      transition: width 0.4s ease;
+      width: 0%;
+    }
+
+    /* Nav buttons */
+    .nav-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 12px;
+      border-radius: 7px;
+      border: 1px solid #2d3148;
+      background: transparent;
+      color: #94a3b8;
+      font-size: 12px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s;
+    }
+
+    .nav-btn:hover:not(:disabled) { border-color: #4f6ef7; color: #c7d2fe; }
+    .nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .nav-btn.primary { background: #4f6ef7; border-color: #4f6ef7; color: #fff; }
+    .nav-btn.primary:hover:not(:disabled) { background: #3b5aed; }
+
+    /* ── Body row ────────────────────────────────────────────── */
+    #body {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+    }
+
+    /* ── Sidebar ─────────────────────────────────────────────── */
+    #sidebar {
+      width: 280px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      background: #1a1d27;
+      border-right: 1px solid #2d3148;
+    }
+
+    #search-wrap {
+      padding: 10px 12px;
+      border-bottom: 1px solid #2d3148;
+    }
+
+    #search {
+      width: 100%;
+      background: #0f1117;
+      border: 1px solid #2d3148;
+      border-radius: 6px;
+      padding: 7px 10px;
+      color: #e2e8f0;
+      font-size: 13px;
+      outline: none;
+    }
+
+    #search:focus { border-color: #4f6ef7; }
+
+    #filter-wrap {
+      padding: 8px 12px;
+      border-bottom: 1px solid #2d3148;
+      display: flex;
+      gap: 5px;
+    }
+
+    .filter-btn {
+      flex: 1;
+      padding: 5px 6px;
+      border-radius: 5px;
+      border: 1px solid #2d3148;
+      background: transparent;
+      color: #94a3b8;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .filter-btn.active { background: #4f6ef7; border-color: #4f6ef7; color: #fff; }
+    .filter-btn:hover:not(.active) { border-color: #4f6ef7; color: #c7d2fe; }
+
+    #cafe-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 0;
+    }
+
+    #cafe-list::-webkit-scrollbar { width: 4px; }
+    #cafe-list::-webkit-scrollbar-track { background: transparent; }
+    #cafe-list::-webkit-scrollbar-thumb { background: #2d3148; border-radius: 2px; }
+
+    .cafe-item {
+      padding: 9px 12px;
+      cursor: pointer;
+      border-left: 3px solid transparent;
+      transition: background 0.1s;
+    }
+
+    .cafe-item:hover { background: #22263a; }
+    .cafe-item.active { background: #1e2240; border-left-color: #4f6ef7; }
+    .cafe-item.moved { border-left-color: #22c55e; }
+    .cafe-item.moved.active { border-left-color: #4ade80; background: #1a2e1f; }
+
+    .cafe-item-name {
+      font-size: 13px;
+      color: #e2e8f0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .cafe-item-meta {
+      font-size: 11px;
+      color: #64748b;
+      margin-top: 2px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .badge {
+      font-size: 10px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-weight: 500;
+      flex-shrink: 0;
+    }
+
+    .badge-moved    { background: #14532d; color: #4ade80; }
+    .badge-original { background: #1e1b4b; color: #818cf8; }
+
+    /* ── Map area ────────────────────────────────────────────── */
+    #map-wrap {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+
+    #map { width: 100%; height: 100%; }
+
+    /* ── Layer toggle ────────────────────────────────────────── */
+    #layer-toggle {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 800;
+      display: flex;
+      background: #1a1d27;
+      border: 1px solid #2d3148;
+      border-radius: 7px;
+      overflow: hidden;
+    }
+
+    .layer-btn {
+      padding: 7px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      border: none;
+      background: transparent;
+      color: #94a3b8;
+      transition: all 0.15s;
+    }
+
+    .layer-btn.active { background: #4f6ef7; color: #fff; }
+    .layer-btn:hover:not(.active) { color: #e2e8f0; }
+
+    /* ── Detail card ─────────────────────────────────────────── */
+    #detail {
+      position: absolute;
+      bottom: 16px;
+      right: 16px;
+      background: #1a1d27;
+      border: 1px solid #2d3148;
+      border-radius: 12px;
+      padding: 16px;
+      width: 280px;
+      z-index: 800;
+      display: none;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    }
+
+    #detail.visible { display: block; }
+
+    #detail-status-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    #detail-badge {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-weight: 500;
+    }
+
+    #detail-counter {
+      font-size: 11px;
+      color: #64748b;
+    }
+
+    #detail h3 {
+      font-size: 15px;
+      font-weight: 600;
+      color: #f8fafc;
+      margin-bottom: 4px;
+      line-height: 1.3;
+    }
+
+    #detail-area {
+      font-size: 11px;
+      color: #64748b;
+      margin-bottom: 10px;
+    }
+
+    /* Google Maps link */
+    #detail-gmaps {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 10px;
+      background: #0f1117;
+      border: 1px solid #2d3148;
+      border-radius: 7px;
+      text-decoration: none;
+      color: #94a3b8;
+      font-size: 12px;
+      margin-bottom: 10px;
+      transition: all 0.15s;
+    }
+
+    #detail-gmaps:hover { border-color: #4f6ef7; color: #c7d2fe; }
+
+    #detail-gmaps svg { flex-shrink: 0; }
+
+    #detail-coords {
+      font-size: 11px;
+      color: #64748b;
+      font-family: monospace;
+      margin-bottom: 12px;
+      line-height: 1.7;
+    }
+
+    #detail-coords .label { color: #475569; }
+    #detail-coords .val   { color: #94a3b8; }
+
+    /* Drag hint */
+    #drag-hint {
+      font-size: 11px;
+      color: #4f6ef7;
+      text-align: center;
+      padding: 7px 0;
+      border: 1px dashed #2d3148;
+      border-radius: 6px;
+      margin-bottom: 10px;
+    }
+
+    /* Save success banner (replaces drag hint after save) */
+    #save-banner {
+      font-size: 12px;
+      color: #4ade80;
+      background: #14532d22;
+      border: 1px solid #22c55e44;
+      border-radius: 6px;
+      padding: 7px 10px;
+      text-align: center;
+      margin-bottom: 10px;
+      display: none;
+    }
+
+    #save-banner.visible { display: block; }
+
+    #detail-actions {
+      display: flex;
+      gap: 7px;
+    }
+
+    .btn {
+      flex: 1;
+      padding: 8px 10px;
+      border-radius: 7px;
+      border: none;
+      font-size: 12px;
+      cursor: pointer;
+      font-weight: 500;
+      transition: opacity 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+    }
+
+    .btn:hover { opacity: 0.85; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-ghost  { background: #22263a; color: #94a3b8; }
+    .btn-danger { background: #7f1d1d40; color: #fca5a5; border: 1px solid #7f1d1d; }
+    .btn-next   { background: #4f6ef7; color: #fff; }
+    .btn-next.done { background: #22c55e; }
+
+    /* ── Loading overlay ─────────────────────────────────────── */
+    #loading {
+      position: absolute;
+      inset: 0;
+      background: rgba(15, 17, 23, 0.85);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 5000;
+      font-size: 14px;
+      color: #94a3b8;
+      gap: 10px;
+    }
+
+    .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid #2d3148;
+      border-top-color: #4f6ef7;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Toast ───────────────────────────────────────────────── */
+    #toast {
+      position: fixed;
+      top: 62px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-20px);
+      background: #1e2240;
+      border: 1px solid #4f6ef7;
+      color: #c7d2fe;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      pointer-events: none;
+      transition: transform 0.2s ease, opacity 0.2s ease;
+      opacity: 0;
+      z-index: 9999;
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+    #toast.error   { border-color: #ef4444; color: #fca5a5; }
+    #toast.success { border-color: #22c55e; color: #4ade80; background: #14532d22; }
+  </style>
+</head>
+<body>
+
+<!-- Top navigation bar -->
+<div id="topbar">
+  <h1>☕ Point Relocator</h1>
+  <div id="topbar-divider"></div>
+
+  <div id="progress-wrap">
+    <div id="progress-label">Loading…</div>
+    <div id="progress-bar-track"><div id="progress-bar-fill"></div></div>
+  </div>
+
+  <div id="topbar-divider"></div>
+
+  <button class="nav-btn" id="btn-prev" disabled>← Prev</button>
+  <button class="nav-btn primary" id="btn-next-top" disabled>Next →</button>
+</div>
+
+<!-- Body -->
+<div id="body">
+
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div id="search-wrap">
+      <input id="search" type="text" placeholder="Search cafés…" autocomplete="off" />
+    </div>
+
+    <div id="filter-wrap">
+      <button class="filter-btn" data-filter="all">All</button>
+      <button class="filter-btn active" data-filter="original">To do</button>
+      <button class="filter-btn" data-filter="moved">Done</button>
+    </div>
+
+    <div id="cafe-list"></div>
+  </div>
+
+  <!-- Map -->
+  <div id="map-wrap">
+    <div id="loading"><div class="spinner"></div>Loading cafés…</div>
+    <div id="map"></div>
+
+    <div id="layer-toggle">
+      <button class="layer-btn" data-layer="osm">Map</button>
+      <button class="layer-btn active" data-layer="satellite">Satellite</button>
+    </div>
+
+    <!-- Detail card -->
+    <div id="detail">
+      <div id="detail-status-bar">
+        <span id="detail-badge" class="badge"></span>
+        <span id="detail-counter"></span>
+      </div>
+
+      <h3 id="detail-name"></h3>
+      <div id="detail-area"></div>
+
+      <a id="detail-gmaps" href="#" target="_blank" rel="noopener">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+          <circle cx="12" cy="10" r="3"/>
+        </svg>
+        Open in Google Maps
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-left:auto">
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+          <polyline points="15 3 21 3 21 9"/>
+          <line x1="10" y1="14" x2="21" y2="3"/>
+        </svg>
+      </a>
+
+      <div id="detail-coords"></div>
+
+      <div id="drag-hint">✦ Drag the marker to the correct position</div>
+      <div id="save-banner"></div>
+
+      <div id="detail-actions">
+        <button class="btn btn-danger" id="btn-reset">Reset</button>
+        <button class="btn btn-ghost"  id="btn-skip">Skip</button>
+        <button class="btn btn-next"   id="btn-next-detail">Next →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── Config ─────────────────────────────────────────────────────────────────
+const SUPABASE_URL = 'https://nzecpqncvbojuwzivzqi.supabase.co';
+// Service role key — LOCAL admin tool only, never deploy publicly.
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im56ZWNwcW5jdmJvanV3eml2enFpIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDQ1OTQ3NSwiZXhwIjoyMDkwMDM1NDc1fQ.Qj70qGSbpfMVN3ws3r2ZmU2OQwvO35-TrlI9P4RPOWk';
+const COPENHAGEN   = [55.6761, 12.5683];
+const DETAIL_ZOOM  = 18;
+
+// ── Supabase ───────────────────────────────────────────────────────────────
+const { createClient } = supabase;
+const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ── Map ────────────────────────────────────────────────────────────────────
+const map = L.map('map', { zoomControl: true }).setView(COPENHAGEN, 14);
+
+const tileLayers = {
+  osm: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors', maxZoom: 19,
+  }),
+  satellite: L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    { attribution: 'Tiles © Esri', maxZoom: 19 }
+  ),
+};
+tileLayers.satellite.addTo(map); // default: satellite (easier to see buildings)
+
+document.querySelectorAll('.layer-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.layer-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    Object.entries(tileLayers).forEach(([key, layer]) => {
+      if (key === btn.dataset.layer) map.addLayer(layer);
+      else map.removeLayer(layer);
+    });
+  });
+});
+
+// ── State ──────────────────────────────────────────────────────────────────
+let cafes             = [];   // all rows from DB, sorted by name
+let filteredIds       = [];   // ids in current sidebar filter/search order
+let markers           = {};   // id → L.Marker
+let activeId          = null;
+let currentFilter     = 'original';
+let searchQuery       = '';
+let originalPositions = {};   // id → { lat, lng } captured at load time
+let savedThisSession  = new Set(); // ids saved during this session
+
+// ── Icons ──────────────────────────────────────────────────────────────────
+function makeIcon(color, size = 11) {
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      width:${size}px;height:${size}px;border-radius:50%;
+      background:${color};border:2px solid rgba(255,255,255,0.85);
+      box-shadow:0 2px 6px rgba(0,0,0,0.6);
+    "></div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+}
+
+const ICON_ORIGINAL = makeIcon('#818cf8');
+const ICON_MOVED    = makeIcon('#22c55e');
+const ICON_ACTIVE   = makeIcon('#f59e0b', 16);
+
+// ── Load ───────────────────────────────────────────────────────────────────
+async function loadCafes() {
+  const { data, error } = await db.from('cafes').select('*').order('name');
+  if (error) {
+    document.getElementById('loading').innerHTML =
+      `<span style="color:#fca5a5">Failed to load: ${error.message}</span>`;
+    return;
+  }
+
+  cafes = data;
+  cafes.forEach(c => { originalPositions[c.id] = { lat: c.lat, lng: c.lng }; });
+  cafes.forEach(addMarker);
+
+  updateProgress();
+  renderList();
+  document.getElementById('loading').style.display = 'none';
+
+  // Auto-select first unvisited café
+  const first = cafes.find(c => !c.moved);
+  if (first) selectCafe(first.id);
+}
+
+// ── Marker ─────────────────────────────────────────────────────────────────
+function addMarker(cafe) {
+  const m = L.marker([cafe.lat, cafe.lng], {
+    draggable: true,
+    icon: cafe.moved ? ICON_MOVED : ICON_ORIGINAL,
+  });
+  m.addTo(map);
+  m.on('dragend', () => onDragEnd(cafe.id, m));
+  m.on('click',   () => selectCafe(cafe.id));
+  markers[cafe.id] = m;
+}
+
+async function onDragEnd(id, marker) {
+  const { lat, lng } = marker.getLatLng();
+  const cafe = cafes.find(c => c.id === id);
+  if (!cafe) return;
+
+  const { error } = await db.from('cafes')
+    .update({ lat, lng, moved: true })
+    .eq('id', id);
+
+  if (error) {
+    showToast('Save failed: ' + error.message, 'error');
+    marker.setLatLng([cafe.lat, cafe.lng]);
+    return;
+  }
+
+  cafe.lat   = lat;
+  cafe.lng   = lng;
+  cafe.moved = true;
+  savedThisSession.add(id);
+  marker.setIcon(id === activeId ? ICON_ACTIVE : ICON_MOVED);
+
+  updateProgress();
+  renderList();
+  if (id === activeId) showSaveBanner(cafe.name);
+  updateDetail(id);
+}
+
+// ── Select ─────────────────────────────────────────────────────────────────
+function selectCafe(id, fromNav = false) {
+  // Deselect previous
+  if (activeId && markers[activeId]) {
+    const prev = cafes.find(c => c.id === activeId);
+    markers[activeId].setIcon(prev?.moved ? ICON_MOVED : ICON_ORIGINAL);
+  }
+
+  activeId = id;
+  const marker = markers[id];
+  const cafe   = cafes.find(c => c.id === id);
+  if (!marker || !cafe) return;
+
+  marker.setIcon(ICON_ACTIVE);
+  map.flyTo(marker.getLatLng(), DETAIL_ZOOM, { animate: true, duration: 0.6 });
+
+  // Scroll sidebar item into view
+  document.querySelectorAll('.cafe-item').forEach(el => {
+    const isActive = el.dataset.id === id;
+    el.classList.toggle('active', isActive);
+    if (isActive) el.scrollIntoView({ block: 'nearest' });
+  });
+
+  hideSaveBanner();
+  updateDetail(id);
+  updateNavButtons();
+}
+
+// ── Detail panel ───────────────────────────────────────────────────────────
+function updateDetail(id) {
+  const cafe = cafes.find(c => c.id === id);
+  if (!cafe) return;
+
+  const panel = document.getElementById('detail');
+  panel.classList.add('visible');
+
+  // Badge
+  const badge = document.getElementById('detail-badge');
+  if (cafe.moved) {
+    badge.textContent = '✓ Moved';
+    badge.className = 'badge badge-moved';
+  } else {
+    badge.textContent = 'Original';
+    badge.className = 'badge badge-original';
+  }
+
+  // Counter: position in filtered list
+  const idx = filteredIds.indexOf(id);
+  document.getElementById('detail-counter').textContent =
+    idx >= 0 ? `${idx + 1} / ${filteredIds.length}` : '';
+
+  document.getElementById('detail-name').textContent = cafe.name;
+  document.getElementById('detail-area').textContent = cafe.area || '';
+
+  // Google Maps: search for the café name near its location
+  const gmapsUrl = `https://www.google.com/maps/search/${encodeURIComponent(cafe.name)}/@${cafe.lat},${cafe.lng},18z`;
+  document.getElementById('detail-gmaps').href = gmapsUrl;
+
+  // Coords
+  document.getElementById('detail-coords').innerHTML =
+    `<span class="label">lat </span><span class="val">${cafe.lat.toFixed(6)}</span>  ` +
+    `<span class="label">lng </span><span class="val">${cafe.lng.toFixed(6)}</span>`;
+
+  // Next button label
+  const nextBtn = document.getElementById('btn-next-detail');
+  if (cafe.moved) {
+    nextBtn.textContent = 'Next →';
+    nextBtn.className = 'btn btn-next done';
+  } else {
+    nextBtn.textContent = 'Skip →';
+    nextBtn.className = 'btn btn-next';
+  }
+}
+
+function showSaveBanner(name) {
+  document.getElementById('drag-hint').style.display = 'none';
+  const banner = document.getElementById('save-banner');
+  banner.textContent = `✓ Position saved for ${name}`;
+  banner.classList.add('visible');
+}
+
+function hideSaveBanner() {
+  document.getElementById('drag-hint').style.display = 'block';
+  const banner = document.getElementById('save-banner');
+  banner.classList.remove('visible');
+  banner.textContent = '';
+}
+
+// ── Navigation ─────────────────────────────────────────────────────────────
+function navigate(direction) {
+  if (!activeId || filteredIds.length === 0) return;
+  const idx = filteredIds.indexOf(activeId);
+  const next = filteredIds[idx + direction];
+  if (next) selectCafe(next, true);
+}
+
+function updateNavButtons() {
+  const idx = filteredIds.indexOf(activeId);
+  document.getElementById('btn-prev').disabled     = idx <= 0;
+  document.getElementById('btn-next-top').disabled = idx < 0 || idx >= filteredIds.length - 1;
+}
+
+document.getElementById('btn-prev').addEventListener('click',      () => navigate(-1));
+document.getElementById('btn-next-top').addEventListener('click',  () => navigate(+1));
+document.getElementById('btn-next-detail').addEventListener('click', () => navigate(+1));
+document.getElementById('btn-skip').addEventListener('click',      () => navigate(+1));
+
+// ── Reset ──────────────────────────────────────────────────────────────────
+document.getElementById('btn-reset').addEventListener('click', async () => {
+  if (!activeId) return;
+  const orig = originalPositions[activeId];
+  const cafe = cafes.find(c => c.id === activeId);
+  if (!orig || !cafe) return;
+
+  const { error } = await db.from('cafes')
+    .update({ lat: orig.lat, lng: orig.lng, moved: false })
+    .eq('id', activeId);
+
+  if (error) { showToast('Reset failed: ' + error.message, 'error'); return; }
+
+  cafe.lat   = orig.lat;
+  cafe.lng   = orig.lng;
+  cafe.moved = false;
+  savedThisSession.delete(activeId);
+  markers[activeId].setLatLng([orig.lat, orig.lng]);
+  markers[activeId].setIcon(ICON_ACTIVE);
+
+  updateProgress();
+  renderList();
+  hideSaveBanner();
+  updateDetail(activeId);
+  showToast('Position reset to OSM original', 'success');
+});
+
+// ── Sidebar list ───────────────────────────────────────────────────────────
+function getFiltered() {
+  const q = searchQuery.toLowerCase();
+  return cafes.filter(c => {
+    if (currentFilter === 'moved'    && !c.moved) return false;
+    if (currentFilter === 'original' &&  c.moved) return false;
+    if (q && !c.name.toLowerCase().includes(q))   return false;
+    return true;
+  });
+}
+
+function renderList() {
+  const filtered = getFiltered();
+  filteredIds = filtered.map(c => c.id);
+  updateNavButtons();
+
+  const list = document.getElementById('cafe-list');
+  list.innerHTML = '';
+
+  filtered.forEach(cafe => {
+    const div = document.createElement('div');
+    div.className = 'cafe-item' +
+      (cafe.moved   ? ' moved'  : '') +
+      (cafe.id === activeId ? ' active' : '');
+    div.dataset.id = cafe.id;
+    div.innerHTML = `
+      <div class="cafe-item-name">${cafe.name}</div>
+      <div class="cafe-item-meta">
+        <span class="badge ${cafe.moved ? 'badge-moved' : 'badge-original'}">
+          ${cafe.moved ? '✓ moved' : 'original'}
+        </span>
+        ${cafe.area ? `<span>${cafe.area}</span>` : ''}
+      </div>
+    `;
+    div.addEventListener('click', () => selectCafe(cafe.id));
+    list.appendChild(div);
+  });
+
+  if (filtered.length === 0) {
+    list.innerHTML = '<div style="padding:24px 12px;font-size:12px;color:#4a5568;text-align:center">No cafés match</div>';
+  }
+}
+
+// ── Progress ───────────────────────────────────────────────────────────────
+function updateProgress() {
+  const total  = cafes.length;
+  const moved  = cafes.filter(c => c.moved).length;
+  const pct    = total ? Math.round((moved / total) * 100) : 0;
+  document.getElementById('progress-label').textContent =
+    `${moved} / ${total} checked (${pct}%)`;
+  document.getElementById('progress-bar-fill').style.width = pct + '%';
+}
+
+// ── Search & filter ────────────────────────────────────────────────────────
+document.getElementById('search').addEventListener('input', e => {
+  searchQuery = e.target.value;
+  renderList();
+});
+
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentFilter = btn.dataset.filter;
+    renderList();
+  });
+});
+
+// ── Toast ──────────────────────────────────────────────────────────────────
+let toastTimer = null;
+function showToast(msg, type = '') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show ' + type;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = ''; }, 2800);
+}
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+loadCafes();
+</script>
+</body>
+</html>

@@ -403,6 +403,24 @@ out center tags;
         })
 
     supabase = get_service_client()
-    for i in range(0, len(rows), 500):
-        supabase.table("cafes").upsert(rows[i:i + 500]).execute()
-    logger.info(f"Synced {len(rows)} cafes to DB")
+
+    # Fetch IDs of cafes that have been manually moved — preserve their positions.
+    moved_res = supabase.table("cafes").select("id").eq("moved", True).execute()
+    moved_ids = {row["id"] for row in (moved_res.data or [])}
+    if moved_ids:
+        logger.info(f"Skipping lat/lng update for {len(moved_ids)} manually moved cafes")
+
+    # For moved cafes: upsert everything except lat/lng so metadata stays fresh.
+    rows_moved   = [
+        {k: v for k, v in r.items() if k not in ("lat", "lng")}
+        for r in rows if r["id"] in moved_ids
+    ]
+    # For untouched cafes: full upsert including lat/lng.
+    rows_normal  = [r for r in rows if r["id"] not in moved_ids]
+
+    for i in range(0, len(rows_normal), 500):
+        supabase.table("cafes").upsert(rows_normal[i:i + 500]).execute()
+    for i in range(0, len(rows_moved), 500):
+        supabase.table("cafes").upsert(rows_moved[i:i + 500]).execute()
+
+    logger.info(f"Synced {len(rows)} cafes to DB ({len(rows_moved)} positions preserved)")
