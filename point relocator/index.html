@@ -175,6 +175,8 @@
     .cafe-item.active { background: #1e2240; border-left-color: #4f6ef7; }
     .cafe-item.moved { border-left-color: #22c55e; }
     .cafe-item.moved.active { border-left-color: #4ade80; background: #1a2e1f; }
+    .cafe-item.removed { border-left-color: #ef4444; opacity: 0.7; }
+    .cafe-item.removed.active { border-left-color: #fca5a5; background: #2d0f0f; opacity: 1; }
 
     .cafe-item-name {
       font-size: 13px;
@@ -203,6 +205,7 @@
 
     .badge-moved    { background: #14532d; color: #4ade80; }
     .badge-original { background: #1e1b4b; color: #818cf8; }
+    .badge-removed  { background: #450a0a; color: #fca5a5; }
 
     /* ── Map area ────────────────────────────────────────────── */
     #map-wrap {
@@ -372,6 +375,7 @@
     .btn-danger { background: #7f1d1d40; color: #fca5a5; border: 1px solid #7f1d1d; }
     .btn-next   { background: #4f6ef7; color: #fff; }
     .btn-next.done { background: #22c55e; }
+    .btn-remove { background: #450a0a60; color: #fca5a5; border: 1px solid #7f1d1d80; margin-top: 6px; width: 100%; }
 
     /* ── Loading overlay ─────────────────────────────────────── */
     #loading {
@@ -455,6 +459,7 @@
       <button class="filter-btn" data-filter="all">All</button>
       <button class="filter-btn active" data-filter="original">To do</button>
       <button class="filter-btn" data-filter="moved">Done</button>
+      <button class="filter-btn" data-filter="removed">Removed</button>
     </div>
 
     <div id="cafe-list"></div>
@@ -503,6 +508,7 @@
         <button class="btn btn-ghost"  id="btn-skip">Skip</button>
         <button class="btn btn-next"   id="btn-next-detail">Next →</button>
       </div>
+      <button class="btn btn-remove" id="btn-remove">✕ Remove café</button>
     </div>
   </div>
 </div>
@@ -585,14 +591,14 @@ async function loadCafes() {
 
   cafes = data;
   cafes.forEach(c => { originalPositions[c.id] = { lat: c.lat, lng: c.lng }; });
-  cafes.forEach(addMarker);
+  cafes.filter(c => !c.removed).forEach(addMarker);
 
   updateProgress();
   renderList();
   document.getElementById('loading').style.display = 'none';
 
   // Auto-select first unvisited café
-  const first = cafes.find(c => !c.moved);
+  const first = cafes.find(c => !c.moved && !c.removed);
   if (first) selectCafe(first.id);
 }
 
@@ -773,9 +779,14 @@ document.getElementById('btn-reset').addEventListener('click', async () => {
 function getFiltered() {
   const q = searchQuery.toLowerCase();
   return cafes.filter(c => {
-    if (currentFilter === 'moved'    && !c.moved) return false;
-    if (currentFilter === 'original' &&  c.moved) return false;
-    if (q && !c.name.toLowerCase().includes(q))   return false;
+    if (currentFilter === 'removed') {
+      if (!c.removed) return false;
+    } else {
+      if (c.removed) return false;
+      if (currentFilter === 'moved'    && !c.moved) return false;
+      if (currentFilter === 'original' &&  c.moved) return false;
+    }
+    if (q && !c.name.toLowerCase().includes(q)) return false;
     return true;
   });
 }
@@ -791,15 +802,15 @@ function renderList() {
   filtered.forEach(cafe => {
     const div = document.createElement('div');
     div.className = 'cafe-item' +
-      (cafe.moved   ? ' moved'  : '') +
+      (cafe.removed ? ' removed' : cafe.moved ? ' moved' : '') +
       (cafe.id === activeId ? ' active' : '');
     div.dataset.id = cafe.id;
+    const badgeClass = cafe.removed ? 'badge-removed' : cafe.moved ? 'badge-moved' : 'badge-original';
+    const badgeText  = cafe.removed ? '✕ removed'     : cafe.moved ? '✓ moved'    : 'original';
     div.innerHTML = `
       <div class="cafe-item-name">${cafe.name}</div>
       <div class="cafe-item-meta">
-        <span class="badge ${cafe.moved ? 'badge-moved' : 'badge-original'}">
-          ${cafe.moved ? '✓ moved' : 'original'}
-        </span>
+        <span class="badge ${badgeClass}">${badgeText}</span>
         ${cafe.area ? `<span>${cafe.area}</span>` : ''}
       </div>
     `;
