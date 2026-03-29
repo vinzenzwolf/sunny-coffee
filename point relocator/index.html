@@ -679,13 +679,21 @@ function updateDetail(id) {
 
   // Badge
   const badge = document.getElementById('detail-badge');
-  if (cafe.moved) {
+  if (cafe.removed) {
+    badge.textContent = '✕ Removed';
+    badge.className = 'badge badge-removed';
+  } else if (cafe.moved) {
     badge.textContent = '✓ Moved';
     badge.className = 'badge badge-moved';
   } else {
     badge.textContent = 'Original';
     badge.className = 'badge badge-original';
   }
+
+  // Remove button label
+  const removeBtn = document.getElementById('btn-remove');
+  removeBtn.textContent = cafe.removed ? '↩ Restore café' : '✕ Remove café';
+  removeBtn.style.opacity = '1';
 
   // Counter: position in filtered list
   const idx = filteredIds.indexOf(id);
@@ -775,6 +783,41 @@ document.getElementById('btn-reset').addEventListener('click', async () => {
   showToast('Position reset to OSM original', 'success');
 });
 
+// ── Remove / Restore ───────────────────────────────────────────────────────
+document.getElementById('btn-remove').addEventListener('click', async () => {
+  if (!activeId) return;
+  const cafe = cafes.find(c => c.id === activeId);
+  if (!cafe) return;
+
+  const nowRemoved = !cafe.removed;
+
+  const { error } = await db.from('cafes')
+    .update({ removed: nowRemoved })
+    .eq('id', activeId);
+
+  if (error) { showToast((nowRemoved ? 'Remove' : 'Restore') + ' failed: ' + error.message, 'error'); return; }
+
+  cafe.removed = nowRemoved;
+
+  if (nowRemoved) {
+    // Hide marker from map
+    if (markers[activeId]) {
+      map.removeLayer(markers[activeId]);
+      delete markers[activeId];
+    }
+    showToast(`${cafe.name} removed`, 'error');
+  } else {
+    // Re-add marker to map
+    addMarker(cafe);
+    markers[activeId].setIcon(ICON_ACTIVE);
+    showToast(`${cafe.name} restored`, 'success');
+  }
+
+  updateProgress();
+  renderList();
+  updateDetail(activeId);
+});
+
 // ── Sidebar list ───────────────────────────────────────────────────────────
 function getFiltered() {
   const q = searchQuery.toLowerCase();
@@ -825,11 +868,13 @@ function renderList() {
 
 // ── Progress ───────────────────────────────────────────────────────────────
 function updateProgress() {
-  const total  = cafes.length;
-  const moved  = cafes.filter(c => c.moved).length;
-  const pct    = total ? Math.round((moved / total) * 100) : 0;
+  const active  = cafes.filter(c => !c.removed);
+  const total   = active.length;
+  const moved   = active.filter(c => c.moved).length;
+  const removed = cafes.filter(c => c.removed).length;
+  const pct     = total ? Math.round((moved / total) * 100) : 0;
   document.getElementById('progress-label').textContent =
-    `${moved} / ${total} checked (${pct}%)`;
+    `${moved} / ${total} checked (${pct}%)` + (removed ? `  ·  ${removed} removed` : '');
   document.getElementById('progress-bar-fill').style.width = pct + '%';
 }
 
