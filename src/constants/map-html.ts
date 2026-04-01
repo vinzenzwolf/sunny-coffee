@@ -39,6 +39,10 @@ export const MAP_HTML = `<!DOCTYPE html>
       position: absolute;
       inset: 0;
       pointer-events: none;
+      z-index: 1;
+    }
+    .maplibregl-marker {
+      z-index: 2;
     }
     #night-overlay {
       position: absolute;
@@ -161,6 +165,7 @@ export const MAP_HTML = `<!DOCTYPE html>
   var shadowCanvas = document.getElementById('shadow-canvas');
   var shadowCtx = null;
   var lastRawShadowData = { type: 'FeatureCollection', features: [] };
+  var lastBuildingData  = { type: 'FeatureCollection', features: [] };
   var cafeFeatures = [];
   var cafeMarkers = [];
   var lastCafeSunById = {};
@@ -549,7 +554,7 @@ export const MAP_HTML = `<!DOCTYPE html>
     shadowCanvas.style.opacity = shadowsEnabled ? String(SHADOW_OPACITY) : '0';
   }
 
-  function drawShadowCanvas(shadowGeoJSON) {
+  function drawShadowCanvas(shadowGeoJSON, buildingData) {
     if (!shadowCtx || !shadowCanvas) return;
     var w = shadowCanvas.width / (window.devicePixelRatio || 1);
     var h = shadowCanvas.height / (window.devicePixelRatio || 1);
@@ -585,12 +590,12 @@ export const MAP_HTML = `<!DOCTYPE html>
     shadowCtx.fill('nonzero');
 
     // Erase shadow where building footprints stand so buildings appear above shadows.
-    var buildings = queryBuildings();
-    if (buildings.features.length) {
+    // Uses lastBuildingData (same snapshot as the shadow computation) to stay in sync.
+    if (buildingData && buildingData.features.length) {
       shadowCtx.globalCompositeOperation = 'destination-out';
       shadowCtx.beginPath();
-      for (var bi = 0; bi < buildings.features.length; bi++) {
-        var bGeom = buildings.features[bi].geometry;
+      for (var bi = 0; bi < buildingData.features.length; bi++) {
+        var bGeom = buildingData.features[bi].geometry;
         var bPolys = bGeom.type === 'Polygon' ? [bGeom.coordinates] : bGeom.coordinates;
         for (var bpi = 0; bpi < bPolys.length; bpi++) {
           var bRing = bPolys[bpi][0];
@@ -691,7 +696,8 @@ export const MAP_HTML = `<!DOCTYPE html>
       var rawShadowData = computeShadowGeoJSON(buildings, sun, center.lat);
       emitCafeSunStatus(rawShadowData, sun.altitude);
       lastRawShadowData = rawShadowData;
-      drawShadowCanvas(rawShadowData);
+      lastBuildingData  = buildings;
+      drawShadowCanvas(rawShadowData, buildings);
       if (nightOverlay) {
         var isNight = sun.altitude < MIN_SUN_ALT_RAD;
         nightOverlay.style.opacity =
@@ -830,7 +836,7 @@ export const MAP_HTML = `<!DOCTYPE html>
 
   // Redraw canvas every frame during pan/zoom/rotate (just re-projects existing geo coords — fast).
   map.on('move', function () {
-    drawShadowCanvas(lastRawShadowData);
+    drawShadowCanvas(lastRawShadowData, lastBuildingData);
   });
 
   map.on('moveend', function () {
@@ -866,7 +872,7 @@ export const MAP_HTML = `<!DOCTYPE html>
         case 'SET_SHADOWS':
           shadowsEnabled = msg.enabled;
           if (shadowCanvas) shadowCanvas.style.opacity = shadowsEnabled ? String(SHADOW_OPACITY) : '0';
-          drawShadowCanvas(lastRawShadowData);
+          drawShadowCanvas(lastRawShadowData, lastBuildingData);
           scheduleShadowUpdate(0);
           break;
 
