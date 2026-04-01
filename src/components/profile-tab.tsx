@@ -1,4 +1,5 @@
 import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
@@ -20,11 +21,13 @@ type Props = {
   bottomInset: number;
 };
 
+const CAFE_CACHE_STORAGE_KEY = 'cafes_cache_v1';
+
 // ---------------------------------------------------------------------------
 // Logged-in profile view
 // ---------------------------------------------------------------------------
 
-function ProfileLoggedIn({ topInset, bottomInset }: Props) {
+function ProfileLoggedIn({ topInset, bottomInset, onAboutLogoPress }: Props & { onAboutLogoPress: () => void }) {
   const { user, signOut } = useAuth();
   const { useMyLocation, setUseMyLocation } = useLocationSettings();
   const [updatingLocationSetting, setUpdatingLocationSetting] = useState(false);
@@ -144,9 +147,11 @@ function ProfileLoggedIn({ topInset, bottomInset }: Props) {
         {/* About section */}
         <Text style={styles.sectionLabel}>About</Text>
         <View style={styles.aboutCard}>
-          <Text style={styles.aboutLogo}>
-            sunny <Text style={styles.aboutLogoItalic}>coffee</Text>
-          </Text>
+          <TouchableOpacity onPress={onAboutLogoPress} activeOpacity={0.85}>
+            <Text style={styles.aboutLogo}>
+              sunny <Text style={styles.aboutLogoItalic}>coffee</Text>
+            </Text>
+          </TouchableOpacity>
           <Text style={styles.aboutVersion}>Version 1.0.0 · Made in Copenhagen</Text>
           <View style={styles.aboutLinks}>
             <Text style={styles.aboutLink}>Privacy</Text>
@@ -163,7 +168,7 @@ function ProfileLoggedIn({ topInset, bottomInset }: Props) {
 // Logged-out / login view
 // ---------------------------------------------------------------------------
 
-function ProfileLogin({ topInset, bottomInset }: Props) {
+function ProfileLogin({ topInset, bottomInset, onAboutLogoPress }: Props & { onAboutLogoPress: () => void }) {
   const { signInWithGoogle } = useAuth();
   const [signingIn, setSigningIn] = useState(false);
 
@@ -233,9 +238,11 @@ function ProfileLogin({ topInset, bottomInset }: Props) {
         {/* About */}
         <Text style={styles.sectionLabel}>About</Text>
         <View style={styles.aboutCard}>
-          <Text style={styles.aboutLogo}>
-            sunny <Text style={styles.aboutLogoItalic}>coffee</Text>
-          </Text>
+          <TouchableOpacity onPress={onAboutLogoPress} activeOpacity={0.85}>
+            <Text style={styles.aboutLogo}>
+              sunny <Text style={styles.aboutLogoItalic}>coffee</Text>
+            </Text>
+          </TouchableOpacity>
           <Text style={styles.aboutVersion}>Version 1.0.0 · Made in Copenhagen</Text>
           <View style={styles.aboutLinks}>
             <Text style={styles.aboutLink}>Privacy</Text>
@@ -254,6 +261,38 @@ function ProfileLogin({ topInset, bottomInset }: Props) {
 
 export default function ProfileTab(props: Props) {
   const { user, loading } = useAuth();
+  const [tapCount, setTapCount] = useState(0);
+  const [lastTapAt, setLastTapAt] = useState(0);
+
+  const clearCafeCache = async () => {
+    await AsyncStorage.removeItem(CAFE_CACHE_STORAGE_KEY);
+  };
+
+  const handleAboutLogoPress = () => {
+    const now = Date.now();
+    const nextCount = now - lastTapAt > 1200 ? 1 : tapCount + 1;
+    setTapCount(nextCount);
+    setLastTapAt(now);
+
+    if (nextCount < 3) return;
+
+    setTapCount(0);
+    Alert.alert(
+      'Clear cache?',
+      'Do you want to clear the cafe cache?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear cache',
+          style: 'destructive',
+          onPress: () => {
+            void clearCafeCache();
+          },
+        },
+      ],
+      { cancelable: true },
+    );
+  };
 
   if (loading) {
     return (
@@ -263,7 +302,9 @@ export default function ProfileTab(props: Props) {
     );
   }
 
-  return user ? <ProfileLoggedIn {...props} /> : <ProfileLogin {...props} />;
+  return user
+    ? <ProfileLoggedIn {...props} onAboutLogoPress={handleAboutLogoPress} />
+    : <ProfileLogin {...props} onAboutLogoPress={handleAboutLogoPress} />;
 }
 
 // ---------------------------------------------------------------------------
