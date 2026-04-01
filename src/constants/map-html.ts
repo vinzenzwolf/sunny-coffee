@@ -104,9 +104,20 @@ export const MAP_HTML = `<!DOCTYPE html>
       background: #f5a623;
       box-shadow: 0 0 0 2px rgba(255,255,255,0.85), 0 1px 4px rgba(0,0,0,0.2);
     }
+    .cafe-dot-hitbox {
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
     .cafe-dot-pin.shade {
       background: #8a8680;
       box-shadow: 0 0 0 2px rgba(255,255,255,0.85), 0 1px 4px rgba(0,0,0,0.15);
+    }
+    .cafe-dot-pin.shade.sel {
+      box-shadow: 0 0 0 3px #1c1b19, 0 1px 4px rgba(0,0,0,0.2);
     }
 
   </style>
@@ -370,7 +381,10 @@ export const MAP_HTML = `<!DOCTYPE html>
 
     if (dotOnly) {
       var el = document.createElement('div');
-      el.className = 'cafe-dot-pin' + (inSunNow === false ? ' shade' : '') + (isSelected ? ' sel' : '');
+      el.className = 'cafe-dot-hitbox';
+      var dot = document.createElement('div');
+      dot.className = 'cafe-dot-pin' + (inSunNow === false ? ' shade' : '') + (isSelected ? ' sel' : '');
+      el.appendChild(dot);
       var _props = props;
       el.addEventListener('click', function(e) { e.stopPropagation(); handleCafeClick(_props); });
       return el;
