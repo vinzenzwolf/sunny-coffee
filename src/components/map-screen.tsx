@@ -665,6 +665,7 @@ export default function MapScreen() {
   }, [date.toDateString(), userLocation?.lat, userLocation?.lng]);
   const [searchQuery, setSearchQuery] = useState('');
   const locationSubRef = useRef<Location.LocationSubscription | null>(null);
+  const hasInitialCameraFocusRef = useRef(false);
   const showExplore = activeNav === 'explore';
   const showSaved = activeNav === 'saved';
   const showProfile = activeNav === 'profile';
@@ -714,27 +715,87 @@ export default function MapScreen() {
     };
   }, [sendDateToMap]);
 
-  // Start watching location once map is ready (only if permission was granted)
+  // On startup, focus camera on current user location; fallback to city center if unavailable.
   useEffect(() => {
     if (!mapReady) return;
     let sub: Location.LocationSubscription | null = null;
+    let cancelled = false;
     (async () => {
-      const { status } = await Location.getForegroundPermissionsAsync();
-      if (status !== 'granted') return;
+      const focusCenter = (lat: number, lng: number): void => {
+        if (cancelled) return;
+        webviewRef.current?.injectJavaScript(
+          buildPostMessage({ type: 'JUMP_TO', lat, lng }),
+        );
+        hasInitialCameraFocusRef.current = true;
+      };
+      const focusUser = (lat: number, lng: number): void => {
+        if (cancelled) return;
+        setUserLocation({ lat, lng });
+        webviewRef.current?.injectJavaScript(
+          buildPostMessage({ type: 'SET_LOCATION', lat, lng }),
+        );
+        webviewRef.current?.injectJavaScript(
+          buildPostMessage({ type: 'FLY_TO', lat, lng }),
+        );
+        hasInitialCameraFocusRef.current = true;
+      };
+
+      let { status } = await Location.getForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        const req = await Location.requestForegroundPermissionsAsync();
+        status = req.status;
+      }
+      if (status !== 'granted') {
+        focusCenter(DEFAULT_LAT, DEFAULT_LNG);
+        return;
+      }
+
+      const lastKnown = await Location.getLastKnownPositionAsync();
+      if (lastKnown?.coords) {
+        focusUser(lastKnown.coords.latitude, lastKnown.coords.longitude);
+      } else {
+        try {
+          const current = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+          if (current?.coords) {
+            focusUser(current.coords.latitude, current.coords.longitude);
+          } else {
+            focusCenter(DEFAULT_LAT, DEFAULT_LNG);
+          }
+        } catch {
+          focusCenter(DEFAULT_LAT, DEFAULT_LNG);
+        }
+      }
+
       sub = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 10 },
         (loc) => {
           const { latitude: lat, longitude: lng } = loc.coords;
+          if (cancelled) return;
           setUserLocation({ lat, lng });
           webviewRef.current?.injectJavaScript(
             buildPostMessage({ type: 'SET_LOCATION', lat, lng }),
           );
+          if (!hasInitialCameraFocusRef.current) {
+            webviewRef.current?.injectJavaScript(
+              buildPostMessage({ type: 'FLY_TO', lat, lng }),
+            );
+            hasInitialCameraFocusRef.current = true;
+          }
         },
       );
+      if (cancelled) {
+        sub.remove();
+        return;
+      }
       locationSubRef.current = sub;
     })();
-    return () => { sub?.remove(); };
-  }, [mapReady]);
+    return () => {
+      cancelled = true;
+      sub?.remove();
+    };
+  }, [mapReady, DEFAULT_LAT, DEFAULT_LNG]);
 
   // ─── WebView → RN ─────────────────────────────────────────────────────
 
@@ -885,7 +946,7 @@ export default function MapScreen() {
         scrollEnabled={false}
         bounces={false}
         onMessage={handleMessage}
-        onLoadStart={() => { setIsLoading(true); setMapReady(false); }}
+        onLoadStart={() => { setIsLoading(true); setMapReady(false); hasInitialCameraFocusRef.current = false; }}
         onError={(e) => pushToast('error', `WebView: ${e.nativeEvent.description}`)}
       />
 
