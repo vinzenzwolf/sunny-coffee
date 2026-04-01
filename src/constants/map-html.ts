@@ -536,6 +536,9 @@ export const MAP_HTML = `<!DOCTYPE html>
   function initShadowCanvas() {
     if (!shadowCanvas) return;
     var container = map.getContainer();
+    // Move canvas inside the map container. Café markers are appended to this
+    // same container later (by renderCafeMarkers), so they'll sit on top in DOM order.
+    container.appendChild(shadowCanvas);
     var dpr = window.devicePixelRatio || 1;
     shadowCanvas.width  = container.clientWidth  * dpr;
     shadowCanvas.height = container.clientHeight * dpr;
@@ -580,6 +583,30 @@ export const MAP_HTML = `<!DOCTYPE html>
     }
     // nonzero fill: overlapping subpaths are filled once — no alpha stacking.
     shadowCtx.fill('nonzero');
+
+    // Erase shadow where building footprints stand so buildings appear above shadows.
+    var buildings = queryBuildings();
+    if (buildings.features.length) {
+      shadowCtx.globalCompositeOperation = 'destination-out';
+      shadowCtx.beginPath();
+      for (var bi = 0; bi < buildings.features.length; bi++) {
+        var bGeom = buildings.features[bi].geometry;
+        var bPolys = bGeom.type === 'Polygon' ? [bGeom.coordinates] : bGeom.coordinates;
+        for (var bpi = 0; bpi < bPolys.length; bpi++) {
+          var bRing = bPolys[bpi][0];
+          if (!bRing || !bRing.length) continue;
+          var bp0 = map.project([bRing[0][0], bRing[0][1]]);
+          shadowCtx.moveTo(bp0.x, bp0.y);
+          for (var bci = 1; bci < bRing.length; bci++) {
+            var bp = map.project([bRing[bci][0], bRing[bci][1]]);
+            shadowCtx.lineTo(bp.x, bp.y);
+          }
+          shadowCtx.closePath();
+        }
+      }
+      shadowCtx.fill('nonzero');
+      shadowCtx.globalCompositeOperation = 'source-over';
+    }
   }
 
   function computeShadowGeoJSON(buildings, sun, refLatDeg, options) {
@@ -743,13 +770,13 @@ export const MAP_HTML = `<!DOCTYPE html>
       .map(function (l) { return l.id; });
 
 
-    // Buildings should be fully opaque and render from zoom 14.
+    // Buildings: flat 2D fill only — disable fill-extrusion (3D effect), keep flat fill layers.
     buildingLayerIds.forEach(function (id) {
       try {
         var layer = map.getLayer(id);
         if (!layer) return;
         if (layer.type === 'fill-extrusion') {
-          map.setPaintProperty(id, 'fill-extrusion-opacity', 1);
+          map.setPaintProperty(id, 'fill-extrusion-opacity', 0);
         } else if (layer.type === 'fill') {
           map.setPaintProperty(id, 'fill-opacity', 1);
         }
