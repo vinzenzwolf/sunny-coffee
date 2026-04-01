@@ -201,6 +201,11 @@ function VenueCard({
   const rawMinutes = isFinite(date.getTime())
     ? date.getHours() * 60 + date.getMinutes()
     : sunriseMinutes;
+  const nowMinutes = (() => {
+    const now = new Date();
+    return now.getHours() * 60 + now.getMinutes();
+  })();
+  const stateLabel = isLive ? 'LIVE' : rawMinutes < nowMinutes ? 'PAST' : 'PREVIEW';
   const labelMinutes = scrubMinutes ?? rawMinutes;
   const displayedMinutes = Math.min(Math.max(labelMinutes, sunriseMinutes), sunsetMinutes);
   const dayFraction = range > 0 ? (displayedMinutes - sunriseMinutes) / range : 0;
@@ -278,7 +283,7 @@ function VenueCard({
         <View style={vcStyles.sliderHead}>
           <View style={[vcStyles.stateBadge, isLive ? vcStyles.stateBadgeLive : vcStyles.stateBadgePreview]}>
             <Text style={[vcStyles.stateBadgeText, isLive ? vcStyles.stateBadgeTextLive : vcStyles.stateBadgeTextPreview]}>
-              {isLive ? 'LIVE' : 'PREVIEW'}
+              {stateLabel}
             </Text>
           </View>
           <TouchableOpacity style={[vcStyles.nowBtn, isLive && vcStyles.nowBtnHidden]} activeOpacity={0.8} onPress={onSetNow} disabled={isLive}>

@@ -84,6 +84,11 @@ export function TimeControls({
   );
 
   const rawMinutes = isFinite(date.getTime()) ? date.getHours() * 60 + date.getMinutes() : sunriseMinutes;
+  const nowMinutes = (() => {
+    const now = new Date();
+    return now.getHours() * 60 + now.getMinutes();
+  })();
+  const stateLabel = isLive ? 'LIVE' : rawMinutes < nowMinutes ? 'PAST' : 'PREVIEW';
   const labelMinutes = scrubMinutes ?? rawMinutes;
   const displayedMinutes = Math.min(Math.max(labelMinutes, sunriseMinutes), sunsetMinutes);
   const range = sunsetMinutes - sunriseMinutes;
@@ -102,11 +107,11 @@ export function TimeControls({
 
   return (
     <View style={[styles.container, { bottom }]}>
-      {/* Header: status left, now action right (preview only) */}
+      {/* Header: status left, now action right (non-live only) */}
       <View style={styles.head}>
         <View style={[styles.stateBadge, isLive ? styles.stateBadgeLive : styles.stateBadgePreview]}>
           <Text style={[styles.stateBadgeText, isLive ? styles.stateBadgeTextLive : styles.stateBadgeTextPreview]}>
-            {isLive ? 'LIVE' : 'PREVIEW'}
+            {stateLabel}
           </Text>
         </View>
         <TouchableOpacity style={[styles.nowBtn, isLive && styles.nowBtnHidden]} onPress={onSetNow} activeOpacity={0.85} disabled={isLive}>
