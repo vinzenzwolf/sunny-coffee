@@ -113,6 +113,7 @@ function rowToCafe(
     name: row.name || 'Cafe',
     lat: row.lat,
     lng: row.lng,
+    removed: row.removed === true,
     googleFormattedAddress: row.google_formatted_address,
     metadata: {
       openingHours: row.opening_hours ?? openingHoursMap.get(row.id),
@@ -127,10 +128,18 @@ export async function fetchCafesFromSupabase(): Promise<Cafe[]> {
     (async () => {
       const primary = await supabase
         .from('cafes')
-        .select('id, name, lat, lng, opening_hours, google_formatted_address');
+        .select('id, name, lat, lng, opening_hours, google_formatted_address, removed')
+        .eq('removed', false);
       if (!primary.error) return primary;
       if (primary.error.code !== '42703') return primary;
       // Fallback for schemas that do not have opening_hours.
+      const fallbackNoOpeningHours = await supabase
+        .from('cafes')
+        .select('id, name, lat, lng, google_formatted_address, removed')
+        .eq('removed', false);
+      if (!fallbackNoOpeningHours.error) return fallbackNoOpeningHours;
+      if (fallbackNoOpeningHours.error.code !== '42703') return fallbackNoOpeningHours;
+      // Legacy fallback for schemas without removed column.
       return supabase
         .from('cafes')
         .select('id, name, lat, lng, google_formatted_address');
@@ -156,9 +165,9 @@ export async function fetchCafesFromSupabase(): Promise<Cafe[]> {
 
   const hoursMap = openingHoursByCafeId(hourRows);
 
-  return ((cafesRes.data ?? []) as SupabaseCafeRow[]).map((row) =>
-    rowToCafe(row, sunWindowsByCafeId, hoursMap),
-  );
+  return ((cafesRes.data ?? []) as SupabaseCafeRow[])
+    .filter((row) => row.removed !== true)
+    .map((row) => rowToCafe(row, sunWindowsByCafeId, hoursMap));
 }
 
 export async function saveCachedCafes(cafes: Cafe[]): Promise<void> {
