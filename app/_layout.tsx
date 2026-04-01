@@ -8,7 +8,9 @@ import 'react-native-reanimated';
 
 import { useColorScheme } from 'react-native';
 import { Onboarding } from '@/src/components/onboarding';
+import { AuthProvider } from '@/src/context/auth-context';
 import { CafeDataProvider } from '@/src/context/cafe-data-context';
+import { SavedCafesProvider } from '@/src/context/saved-cafes-context';
 
 const ONBOARDING_KEY = 'onboarding_complete';
 
@@ -38,6 +40,8 @@ export default function RootLayout() {
   if (onboardingDone === null) return null;
 
   return (
+    <AuthProvider>
+    <SavedCafesProvider>
     <CafeDataProvider>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <Stack>
@@ -52,5 +56,7 @@ export default function RootLayout() {
         )}
       </ThemeProvider>
     </CafeDataProvider>
+    </SavedCafesProvider>
+    </AuthProvider>
   );
 }

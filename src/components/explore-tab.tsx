@@ -13,7 +13,6 @@ import { getOpenUntilToday } from '../utils/opening-hours';
 type ExploreCard = {
   id: string;
   name: string;
-  area: string;
   tag: string;
   open: string;
   gradient: readonly [string, string, string];
@@ -42,7 +41,6 @@ function normalizeExploreCards(cafes: Cafe[]): { sunNow: ExploreCard[]; sunLater
       return {
         id: cafe.id,
         name: cafe.name || 'Cafe',
-        area: cafe.area || 'Copenhagen',
         tag: '☀ In the sun now',
         open: `Open until ${openStatus.closesAt}`,
         gradient: SUN_NOW_GRADIENTS[idx % SUN_NOW_GRADIENTS.length],
@@ -88,7 +86,6 @@ function ExploreCardItem({
         <View style={styles.explorePhotoShade} />
         <View style={styles.exploreOverlay}>
           <Text style={styles.exploreName}>{card.name}</Text>
-          <Text style={styles.exploreArea}>{card.area}</Text>
         </View>
       </View>
       <View style={styles.exploreInfo}>

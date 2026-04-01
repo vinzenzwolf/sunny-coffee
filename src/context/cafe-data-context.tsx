@@ -4,7 +4,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import type { Cafe } from '../types';
 import {
   enrichCafesWithDistance,
-  fetchCafesFromOverpass,
+  fetchCafesFromSupabase,
   loadCachedCafes,
   saveCachedCafes,
 } from '../services/cafe-repository';
@@ -13,7 +13,6 @@ interface CafeDataContextValue {
   cafes: Cafe[];
   loading: boolean;
   error: string | null;
-  refresh: () => Promise<void>;
   updateSunStatus: (statuses: { id: string; inSun: boolean }[]) => void;
 }
 
@@ -46,22 +45,6 @@ export function CafeDataProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
-    try {
-      setError(null);
-      const currentLocation = await getCurrentLocation();
-      const fresh = await fetchCafesFromOverpass();
-      const withDistance = enrichCafesWithDistance(fresh, currentLocation);
-      setCafes(withDistance);
-      await saveCachedCafes(withDistance);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Cafe refresh failed';
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   const updateSunStatus = useCallback((statuses: { id: string; inSun: boolean }[]) => {
     if (!statuses.length) return;
     const statusById = new Map(statuses.map((s) => [s.id, s.inSun]));
@@ -90,27 +73,37 @@ export function CafeDataProvider({ children }: { children: React.ReactNode }) {
     (async () => {
       try {
         const currentLocation = await getCurrentLocation();
+
+        // Show cached data immediately while fetching fresh data
         const cached = await loadCachedCafes();
         if (!cancelled && cached?.length) {
-          const cachedWithDistance = enrichCafesWithDistance(cached, currentLocation);
-          setCafes(cachedWithDistance);
-          await saveCachedCafes(cachedWithDistance);
+          setCafes(enrichCafesWithDistance(cached, currentLocation));
         }
-      } catch {
-        // Ignore cache read errors and continue with network refresh.
+
+        // Fetch fresh from Supabase
+        const fresh = await fetchCafesFromSupabase();
+        if (!cancelled) {
+          const withDistance = enrichCafesWithDistance(fresh, currentLocation);
+          setCafes(withDistance);
+          await saveCachedCafes(withDistance);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to load cafes');
+        }
       } finally {
-        if (!cancelled) void refresh();
+        if (!cancelled) setLoading(false);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [refresh]);
+  }, []);
 
   const value = useMemo(
-    () => ({ cafes, loading, error, refresh, updateSunStatus }),
-    [cafes, loading, error, refresh, updateSunStatus],
+    () => ({ cafes, loading, error, updateSunStatus }),
+    [cafes, loading, error, updateSunStatus],
   );
 
   return <CafeDataContext.Provider value={value}>{children}</CafeDataContext.Provider>;

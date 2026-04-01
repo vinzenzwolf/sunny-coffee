@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.sunny-coffee"
+      "bundleIdentifier": "ch.vinzenzwolf.sunnycoffee"
     },
     "android": {
       "edgeToEdgeEnabled": true,

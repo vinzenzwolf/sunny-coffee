@@ -43,9 +43,12 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { MAP_HTML } from '../constants/map-html';
 import { useCafeData } from '../context/cafe-data-context';
+import { useSavedCafes } from '../context/saved-cafes-context';
 import { getDaylight } from '../services/sun-position';
 import { throttle } from '../utils/debounce';
 import ExploreTab from './explore-tab';
+import ProfileTab from './profile-tab';
+import SavedTab from './saved-tab';
 import { TimeControls } from './time-controls';
 import type { Cafe, ToastMessage } from '../types';
 
@@ -75,7 +78,7 @@ type WebViewMessage =
   | { type: 'MAP_READY' }
   | { type: 'STATUS'; buildingCount: number; sunAlt: number; sunAz: number }
   | { type: 'CAFE_SUN_STATUS'; statuses: { id: string; inSun: boolean }[] }
-  | { type: 'CAFE_SELECTED'; id: string; name: string; lat: number; lng: number; area?: string; inSunNow?: boolean; distanceMeters?: number; distanceKm?: number }
+  | { type: 'CAFE_SELECTED'; id: string; name: string; lat: number; lng: number; inSunNow?: boolean; distanceMeters?: number; distanceKm?: number }
   | { type: 'WARNING'; message: string }
   | { type: 'ERROR'; message: string };
 
@@ -95,6 +98,20 @@ const NAV_ITEMS: NavItem[] = [
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
+
+function HeartButton({ cafeId }: { cafeId: string }) {
+  const { isSaved, toggle } = useSavedCafes();
+  const saved = isSaved(cafeId);
+  return (
+    <TouchableOpacity
+      style={[vcStyles.arrow, saved && vcStyles.arrowSaved]}
+      onPress={() => toggle(cafeId)}
+      activeOpacity={0.8}
+    >
+      <Ionicons name={saved ? 'heart' : 'heart-outline'} size={17} color="#fff" />
+    </TouchableOpacity>
+  );
+}
 
 function VenueCard({
   cafe,
@@ -168,7 +185,7 @@ function VenueCard({
     if (typeof m === 'number') return `${Math.round(m)}m away`;
     return null;
   })();
-  const metaParts = [cafe.area, distanceText].filter(Boolean);
+  const metaParts = [distanceText].filter(Boolean);
 
   return (
     <View style={[vcStyles.card, { bottom }]}>
@@ -193,9 +210,7 @@ function VenueCard({
             </View>
           )}
         </View>
-        <TouchableOpacity style={vcStyles.arrow} activeOpacity={0.8}>
-          <Text style={{ color: '#fff', fontSize: 16 }}>→</Text>
-        </TouchableOpacity>
+        <HeartButton cafeId={cafe.id} />
       </View>
 
       {/* Inset slider */}
@@ -331,6 +346,9 @@ const vcStyles = StyleSheet.create({
     justifyContent: 'center',
     flexShrink: 0,
   },
+  arrowSaved: {
+    backgroundColor: '#E8391A',
+  },
   sliderInset: {
     backgroundColor: '#F8F6F3',
     borderRadius: 12,
@@ -462,7 +480,7 @@ function SearchBar({
               <Ionicons name="cafe-outline" size={14} color="#9A9690" />
               <View style={styles.searchResultTextWrap}>
                 <Text numberOfLines={1} style={styles.searchResultTitle}>{cafe.name || 'Cafe'}</Text>
-                <Text numberOfLines={1} style={styles.searchResultSubtitle}>{cafe.area || 'Copenhagen'}</Text>
+                <Text numberOfLines={1} style={styles.searchResultSubtitle}>Copenhagen</Text>
               </View>
               <Ionicons name="chevron-forward" size={14} color="#C0BCB8" />
             </TouchableOpacity>
@@ -547,13 +565,14 @@ export default function MapScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const locationSubRef = useRef<Location.LocationSubscription | null>(null);
   const showExplore = activeNav === 'explore';
+  const showSaved = activeNav === 'saved';
+  const showProfile = activeNav === 'profile';
   const trimmedQuery = searchQuery.trim().toLowerCase();
   const searchResults = trimmedQuery
     ? cafes
       .filter((cafe) => {
         const name = (cafe.name || '').toLowerCase();
-        const area = (cafe.area || '').toLowerCase();
-        return name.includes(trimmedQuery) || area.includes(trimmedQuery);
+        return name.includes(trimmedQuery);
       })
       .sort((a, b) => {
         const ad = a.metadata?.distanceMeters ?? Number.POSITIVE_INFINITY;
@@ -581,7 +600,6 @@ export default function MapScreen() {
           name: cafe.name,
           lat: cafe.lat,
           lng: cafe.lng,
-          area: cafe.area,
           metadata: cafe.metadata ?? {},
         })),
       }),
@@ -647,7 +665,6 @@ export default function MapScreen() {
           name: msg.name,
           lat: msg.lat,
           lng: msg.lng,
-          area: msg.area,
           metadata: {
             inSunNow: msg.inSunNow,
             distanceMeters: msg.distanceMeters ?? undefined,
@@ -762,7 +779,7 @@ export default function MapScreen() {
       />
 
       {/* Search bar */}
-      {!showExplore && (
+      {!showExplore && !showSaved && !showProfile && (
         <SearchBar
           top={searchBarTop}
           query={searchQuery}
@@ -778,6 +795,21 @@ export default function MapScreen() {
           topInset={insets.top}
           bottomInset={cardBottom}
           cafes={cafes}
+        />
+      )}
+
+      {showSaved && (
+        <SavedTab
+          topInset={insets.top}
+          bottomInset={cardBottom}
+          onBrowse={() => setActiveNav('explore')}
+        />
+      )}
+
+      {showProfile && (
+        <ProfileTab
+          topInset={insets.top}
+          bottomInset={cardBottom}
         />
       )}
 
@@ -798,7 +830,7 @@ export default function MapScreen() {
       )}
 
       {/* Time / shadow controls */}
-      {!showExplore && (
+      {!showExplore && !showSaved && !showProfile && (
         selectedCafe ? (
           <VenueCard
             cafe={selectedCafe}

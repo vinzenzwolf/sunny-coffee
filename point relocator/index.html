@@ -112,6 +112,7 @@
       flex-direction: column;
       background: #1a1d27;
       border-right: 1px solid #2d3148;
+      overflow: hidden;
     }
 
     #search-wrap {
@@ -164,6 +165,119 @@
     #cafe-list::-webkit-scrollbar-track { background: transparent; }
     #cafe-list::-webkit-scrollbar-thumb { background: #2d3148; border-radius: 2px; }
 
+    /* ── Bulk mode ───────────────────────────────────────────────── */
+    #bulk-toggle {
+      padding: 8px 12px;
+      border-bottom: 1px solid #2d3148;
+    }
+
+    #btn-bulk-toggle {
+      width: 100%;
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 1px solid #2d3148;
+      background: transparent;
+      color: #94a3b8;
+      font-size: 12px;
+      cursor: pointer;
+      text-align: left;
+      transition: all 0.15s;
+    }
+
+    #btn-bulk-toggle:hover, #btn-bulk-toggle.active {
+      border-color: #ef4444;
+      color: #fca5a5;
+      background: #450a0a40;
+    }
+
+    #bulk-panel {
+      display: none;
+      flex-direction: column;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    #bulk-panel.visible { display: flex; }
+
+    #bulk-search-wrap {
+      padding: 8px 12px;
+      border-bottom: 1px solid #2d3148;
+    }
+
+    #bulk-search {
+      width: 100%;
+      background: #0f1117;
+      border: 1px solid #2d3148;
+      border-radius: 6px;
+      padding: 7px 10px;
+      color: #e2e8f0;
+      font-size: 13px;
+      outline: none;
+    }
+
+    #bulk-search:focus { border-color: #ef4444; }
+
+    #bulk-select-all-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      border-bottom: 1px solid #2d3148;
+      font-size: 12px;
+      color: #94a3b8;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    #bulk-select-all-row:hover { color: #e2e8f0; }
+
+    #bulk-select-all-row input[type=checkbox] { accent-color: #ef4444; cursor: pointer; }
+
+    #bulk-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 0;
+    }
+
+    #bulk-list::-webkit-scrollbar { width: 4px; }
+    #bulk-list::-webkit-scrollbar-track { background: transparent; }
+    #bulk-list::-webkit-scrollbar-thumb { background: #2d3148; border-radius: 2px; }
+
+    .bulk-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.1s;
+    }
+
+    .bulk-item:hover { background: #22263a; }
+    .bulk-item input[type=checkbox] { accent-color: #ef4444; cursor: pointer; flex-shrink: 0; }
+    .bulk-item-name { font-size: 13px; color: #e2e8f0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    #bulk-footer {
+      padding: 10px 12px;
+      border-top: 1px solid #2d3148;
+    }
+
+    #btn-bulk-remove {
+      width: 100%;
+      padding: 8px;
+      border-radius: 7px;
+      border: 1px solid #7f1d1d;
+      background: #450a0a60;
+      color: #fca5a5;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    #btn-bulk-remove:hover:not(:disabled) { background: #7f1d1d80; }
+    #btn-bulk-remove:disabled { opacity: 0.35; cursor: not-allowed; }
+
     .cafe-item {
       padding: 9px 12px;
       cursor: pointer;
@@ -195,6 +309,21 @@
       gap: 5px;
     }
 
+    .restore-btn {
+      margin-left: auto;
+      padding: 2px 6px;
+      border-radius: 3px;
+      border: 1px solid #2d5a2d;
+      background: transparent;
+      color: #4ade80;
+      font-size: 10px;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: all 0.15s;
+    }
+
+    .restore-btn:hover { background: #14532d44; }
+
     .badge {
       font-size: 10px;
       padding: 1px 5px;
@@ -216,31 +345,6 @@
 
     #map { width: 100%; height: 100%; }
 
-    /* ── Layer toggle ────────────────────────────────────────── */
-    #layer-toggle {
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      z-index: 800;
-      display: flex;
-      background: #1a1d27;
-      border: 1px solid #2d3148;
-      border-radius: 7px;
-      overflow: hidden;
-    }
-
-    .layer-btn {
-      padding: 7px 12px;
-      font-size: 12px;
-      cursor: pointer;
-      border: none;
-      background: transparent;
-      color: #94a3b8;
-      transition: all 0.15s;
-    }
-
-    .layer-btn.active { background: #4f6ef7; color: #fff; }
-    .layer-btn:hover:not(.active) { color: #e2e8f0; }
 
     /* ── Detail card ─────────────────────────────────────────── */
     #detail {
@@ -462,6 +566,24 @@
       <button class="filter-btn" data-filter="removed">Removed</button>
     </div>
 
+    <div id="bulk-toggle">
+      <button id="btn-bulk-toggle">✕ Bulk remove…</button>
+    </div>
+
+    <div id="bulk-panel">
+      <div id="bulk-search-wrap">
+        <input id="bulk-search" type="text" placeholder="Filter by name…" autocomplete="off" />
+      </div>
+      <div id="bulk-select-all-row">
+        <input type="checkbox" id="chk-select-all" />
+        <label for="chk-select-all" id="bulk-select-label">Select all</label>
+      </div>
+      <div id="bulk-list"></div>
+      <div id="bulk-footer">
+        <button id="btn-bulk-remove" disabled>Remove 0 selected</button>
+      </div>
+    </div>
+
     <div id="cafe-list"></div>
   </div>
 
@@ -470,12 +592,8 @@
     <div id="loading"><div class="spinner"></div>Loading cafés…</div>
     <div id="map"></div>
 
-    <div id="layer-toggle">
-      <button class="layer-btn" data-layer="osm">Map</button>
-      <button class="layer-btn active" data-layer="satellite">Satellite</button>
-    </div>
 
-    <!-- Detail card -->
+<!-- Detail card -->
     <div id="detail">
       <div id="detail-status-bar">
         <span id="detail-badge" class="badge"></span>
@@ -483,7 +601,6 @@
       </div>
 
       <h3 id="detail-name"></h3>
-      <div id="detail-area"></div>
 
       <a id="detail-gmaps" href="#" target="_blank" rel="noopener">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -505,7 +622,6 @@
 
       <div id="detail-actions">
         <button class="btn btn-danger" id="btn-reset">Reset</button>
-        <button class="btn btn-ghost"  id="btn-skip">Skip</button>
         <button class="btn btn-next"   id="btn-next-detail">Next →</button>
       </div>
       <button class="btn btn-remove" id="btn-remove">✕ Remove café</button>
@@ -530,30 +646,12 @@ const db = createClient(SUPABASE_URL, SUPABASE_KEY);
 // ── Map ────────────────────────────────────────────────────────────────────
 const map = L.map('map', { zoomControl: true }).setView(COPENHAGEN, 14);
 
-const tileLayers = {
-  osm: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors', maxZoom: 19,
-  }),
-  satellite: L.tileLayer(
-    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    { attribution: 'Tiles © Esri', maxZoom: 19 }
-  ),
-};
-tileLayers.satellite.addTo(map); // default: satellite (easier to see buildings)
-
-document.querySelectorAll('.layer-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.layer-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    Object.entries(tileLayers).forEach(([key, layer]) => {
-      if (key === btn.dataset.layer) map.addLayer(layer);
-      else map.removeLayer(layer);
-    });
-  });
-});
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap contributors', maxZoom: 19,
+}).addTo(map);
 
 // ── State ──────────────────────────────────────────────────────────────────
-let cafes             = [];   // all rows from DB, sorted by name
+let cafes             = [];   // all rows from DB
 let filteredIds       = [];   // ids in current sidebar filter/search order
 let markers           = {};   // id → L.Marker
 let activeId          = null;
@@ -581,15 +679,39 @@ const ICON_MOVED    = makeIcon('#22c55e');
 const ICON_ACTIVE   = makeIcon('#f59e0b', 16);
 
 // ── Load ───────────────────────────────────────────────────────────────────
+// ── Geographic sort (greedy nearest-neighbour from Copenhagen centre) ──────
+function sortGeographically(list) {
+  if (list.length === 0) return list;
+  const remaining = [...list];
+  const sorted = [];
+  // Start from the café closest to Copenhagen centre
+  const CENTRE = { lat: 55.6761, lng: 12.5683 };
+  let cur = CENTRE;
+  while (remaining.length > 0) {
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < remaining.length; i++) {
+      const dLat = remaining[i].lat - cur.lat;
+      const dLng = remaining[i].lng - cur.lng;
+      const dist = dLat * dLat + dLng * dLng; // squared — no need for sqrt
+      if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+    }
+    const next = remaining.splice(bestIdx, 1)[0];
+    sorted.push(next);
+    cur = next;
+  }
+  return sorted;
+}
+
 async function loadCafes() {
-  const { data, error } = await db.from('cafes').select('*').order('name');
+  const { data, error } = await db.from('cafes').select('*');
   if (error) {
     document.getElementById('loading').innerHTML =
       `<span style="color:#fca5a5">Failed to load: ${error.message}</span>`;
     return;
   }
 
-  cafes = data;
+  cafes = sortGeographically(data);
   cafes.forEach(c => { originalPositions[c.id] = { lat: c.lat, lng: c.lng }; });
   cafes.filter(c => !c.removed).forEach(addMarker);
 
@@ -701,10 +823,9 @@ function updateDetail(id) {
     idx >= 0 ? `${idx + 1} / ${filteredIds.length}` : '';
 
   document.getElementById('detail-name').textContent = cafe.name;
-  document.getElementById('detail-area').textContent = cafe.area || '';
 
-  // Google Maps: search for the café name near its location
-  const gmapsUrl = `https://www.google.com/maps/search/${encodeURIComponent(cafe.name)}/@${cafe.lat},${cafe.lng},18z`;
+  // Google Maps: open directly via Place ID (exact match, no ambiguity)
+  const gmapsUrl = `https://www.google.com/maps/place/?q=place_id:${cafe.id}`;
   document.getElementById('detail-gmaps').href = gmapsUrl;
 
   // Coords
@@ -754,7 +875,6 @@ function updateNavButtons() {
 document.getElementById('btn-prev').addEventListener('click',      () => navigate(-1));
 document.getElementById('btn-next-top').addEventListener('click',  () => navigate(+1));
 document.getElementById('btn-next-detail').addEventListener('click', () => navigate(+1));
-document.getElementById('btn-skip').addEventListener('click',      () => navigate(+1));
 
 // ── Reset ──────────────────────────────────────────────────────────────────
 document.getElementById('btn-reset').addEventListener('click', async () => {
@@ -854,11 +974,31 @@ function renderList() {
       <div class="cafe-item-name">${cafe.name}</div>
       <div class="cafe-item-meta">
         <span class="badge ${badgeClass}">${badgeText}</span>
-        ${cafe.area ? `<span>${cafe.area}</span>` : ''}
+        ${cafe.removed ? '<button class="restore-btn" data-id="' + cafe.id + '">↩ restore</button>' : ''}
       </div>
     `;
-    div.addEventListener('click', () => selectCafe(cafe.id));
+    div.addEventListener('click', (e) => {
+      if (e.target.closest('.restore-btn')) return;
+      selectCafe(cafe.id);
+    });
     list.appendChild(div);
+  });
+
+  // Restore buttons in sidebar
+  list.querySelectorAll('.restore-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      const cafe = cafes.find(c => c.id === id);
+      if (!cafe) return;
+      const { error } = await db.from('cafes').update({ removed: false }).eq('id', id);
+      if (error) { showToast('Restore failed: ' + error.message, 'error'); return; }
+      cafe.removed = false;
+      addMarker(cafe);
+      updateProgress();
+      renderList();
+      showToast(`${cafe.name} restored`, 'success');
+    });
   });
 
   if (filtered.length === 0) {
@@ -877,6 +1017,105 @@ function updateProgress() {
     `${moved} / ${total} checked (${pct}%)` + (removed ? `  ·  ${removed} removed` : '');
   document.getElementById('progress-bar-fill').style.width = pct + '%';
 }
+
+// ── Bulk remove ────────────────────────────────────────────────────────────
+let bulkMode    = false;
+let bulkQuery   = '';
+let bulkSelected = new Set(); // ids checked
+
+function getBulkFiltered() {
+  const q = bulkQuery.toLowerCase();
+  return cafes.filter(c => !c.removed && (!q || c.name.toLowerCase().includes(q)));
+}
+
+function renderBulkList() {
+  const filtered = getBulkFiltered();
+  const list = document.getElementById('bulk-list');
+  list.innerHTML = '';
+
+  filtered.forEach(cafe => {
+    const div = document.createElement('div');
+    div.className = 'bulk-item';
+    const checked = bulkSelected.has(cafe.id);
+    div.innerHTML = `
+      <input type="checkbox" data-id="${cafe.id}" ${checked ? 'checked' : ''} />
+      <span class="bulk-item-name">${cafe.name}</span>
+    `;
+    div.addEventListener('click', (e) => {
+      const chk = div.querySelector('input');
+      if (e.target !== chk) chk.checked = !chk.checked;
+      if (chk.checked) bulkSelected.add(cafe.id);
+      else bulkSelected.delete(cafe.id);
+      updateBulkFooter();
+      updateSelectAll();
+    });
+    list.appendChild(div);
+  });
+
+  updateBulkFooter();
+  updateSelectAll();
+}
+
+function updateBulkFooter() {
+  const n = bulkSelected.size;
+  const btn = document.getElementById('btn-bulk-remove');
+  btn.textContent = `Remove ${n} selected`;
+  btn.disabled = n === 0;
+}
+
+function updateSelectAll() {
+  const filtered = getBulkFiltered();
+  const chk = document.getElementById('chk-select-all');
+  const allChecked = filtered.length > 0 && filtered.every(c => bulkSelected.has(c.id));
+  chk.checked = allChecked;
+  chk.indeterminate = !allChecked && filtered.some(c => bulkSelected.has(c.id));
+  document.getElementById('bulk-select-label').textContent =
+    `Select all (${filtered.length})`;
+}
+
+document.getElementById('btn-bulk-toggle').addEventListener('click', () => {
+  bulkMode = !bulkMode;
+  bulkSelected.clear();
+  bulkQuery = '';
+  document.getElementById('bulk-search').value = '';
+  document.getElementById('bulk-panel').classList.toggle('visible', bulkMode);
+  document.getElementById('cafe-list').style.display = bulkMode ? 'none' : '';
+  document.getElementById('btn-bulk-toggle').classList.toggle('active', bulkMode);
+  document.getElementById('btn-bulk-toggle').textContent = bulkMode ? '← Back to list' : '✕ Bulk remove…';
+  if (bulkMode) renderBulkList();
+});
+
+document.getElementById('bulk-search').addEventListener('input', e => {
+  bulkQuery = e.target.value;
+  bulkSelected.clear();
+  renderBulkList();
+});
+
+document.getElementById('chk-select-all').addEventListener('change', e => {
+  const filtered = getBulkFiltered();
+  if (e.target.checked) filtered.forEach(c => bulkSelected.add(c.id));
+  else bulkSelected.clear();
+  renderBulkList();
+});
+
+document.getElementById('btn-bulk-remove').addEventListener('click', async () => {
+  if (bulkSelected.size === 0) return;
+  const ids = [...bulkSelected];
+  const { error } = await db.from('cafes').update({ removed: true }).in('id', ids);
+  if (error) { showToast('Bulk remove failed: ' + error.message, 'error'); return; }
+
+  ids.forEach(id => {
+    const cafe = cafes.find(c => c.id === id);
+    if (!cafe) return;
+    cafe.removed = true;
+    if (markers[id]) { map.removeLayer(markers[id]); delete markers[id]; }
+  });
+
+  bulkSelected.clear();
+  showToast(`Removed ${ids.length} cafés`, 'error');
+  updateProgress();
+  renderBulkList();
+});
 
 // ── Search & filter ────────────────────────────────────────────────────────
 document.getElementById('search').addEventListener('input', e => {

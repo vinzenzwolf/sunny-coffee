@@ -1,23 +1,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { Cafe } from '../types';
+import { supabase } from './supabase';
 
-const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
-const COPENHAGEN_BBOX = { south: 55.60, west: 12.45, north: 55.74, east: 12.73 };
 const CAFE_STORAGE_KEY = 'cafes_cache_v1';
-const REQUEST_TIMEOUT_MS = 20_000;
 
-type OverpassElement = {
-  type: 'node' | 'way' | 'relation';
-  id: number;
-  lat?: number;
-  lon?: number;
-  center?: { lat?: number; lon?: number };
-  tags?: Record<string, string>;
-};
-
-type OverpassResponse = {
-  elements?: OverpassElement[];
+type SupabaseCafeRow = {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
 };
 
 type GeoPoint = {
@@ -31,84 +23,21 @@ type CafeCachePayload = {
   cafes: Cafe[];
 };
 
-function buildCafeQuery() {
-  const { south, west, north, east } = COPENHAGEN_BBOX;
-  return `[out:json][timeout:20];
-(
-  node["amenity"="cafe"](${south},${west},${north},${east});
-  way["amenity"="cafe"](${south},${west},${north},${east});
-  relation["amenity"="cafe"](${south},${west},${north},${east});
-);
-out center tags;`;
-}
-
-function resolveArea(tags: Record<string, string> | undefined): string | undefined {
-  if (!tags) return undefined;
-  return (
-    tags['addr:suburb'] ||
-    tags['addr:neighbourhood'] ||
-    tags['addr:city_district'] ||
-    tags['addr:city'] ||
-    undefined
-  );
-}
-
-function resolveOpeningHours(tags: Record<string, string>): string | undefined {
-  return (
-    tags['opening_hours'] ||
-    tags['contact:opening_hours'] ||
-    undefined
-  );
-}
-
-function normalizeCafe(el: OverpassElement): Cafe | null {
-  const lng = typeof el.lon === 'number' ? el.lon : el.center?.lon;
-  const lat = typeof el.lat === 'number' ? el.lat : el.center?.lat;
-  if (typeof lat !== 'number' || typeof lng !== 'number') return null;
-
-  const tags = el.tags ?? {};
+function rowToCafe(row: SupabaseCafeRow): Cafe {
   return {
-    id: `${el.type}/${el.id}`,
-    name: tags['name'] || 'Cafe',
-    lat,
-    lng,
-    area: resolveArea(tags),
-    metadata: {
-      cuisine: tags['cuisine'],
-      openingHours: resolveOpeningHours(tags),
-      website: tags['website'] || tags['contact:website'],
-      sourceType: el.type,
-      rawTags: tags,
-    },
+    id: row.id,
+    name: row.name || 'Cafe',
+    lat: row.lat,
+    lng: row.lng,
   };
 }
 
-export async function fetchCafesFromOverpass(): Promise<Cafe[]> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-  try {
-    const res = await fetch(OVERPASS_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
-      body: `data=${encodeURIComponent(buildCafeQuery())}`,
-      signal: controller.signal,
-    });
-
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status} ${res.statusText}`);
-    }
-
-    const json = (await res.json()) as OverpassResponse;
-    const elements = Array.isArray(json.elements) ? json.elements : [];
-    const cafes = elements
-      .map(normalizeCafe)
-      .filter((cafe): cafe is Cafe => cafe !== null);
-
-    return cafes;
-  } finally {
-    clearTimeout(timeoutId);
-  }
+export async function fetchCafesFromSupabase(): Promise<Cafe[]> {
+  const { data, error } = await supabase
+    .from('cafes')
+    .select('id, name, lat, lng');
+  if (error) throw new Error(error.message);
+  return (data as SupabaseCafeRow[]).map(rowToCafe);
 }
 
 export async function saveCachedCafes(cafes: Cafe[]): Promise<void> {

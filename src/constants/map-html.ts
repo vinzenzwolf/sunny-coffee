@@ -363,7 +363,6 @@ export const MAP_HTML = `<!DOCTYPE html>
       name: props.name,
       lat: props.lat,
       lng: props.lng,
-      area: props.area,
       inSunNow: props.inSunNow,
       distanceMeters: props.distanceMeters,
       distanceKm: props.distanceKm,
@@ -445,7 +444,6 @@ export const MAP_HTML = `<!DOCTYPE html>
         properties: {
           id: c.id || '',
           name: c.name || 'Cafe',
-          area: c.area || '',
           inSunNow: c.metadata && typeof c.metadata.inSunNow === 'boolean'
             ? c.metadata.inSunNow
             : true,

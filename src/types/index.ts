@@ -99,17 +99,13 @@ export interface ToastMessage {
 // ---------------------------------------------------------------------------
 
 export interface CafeMetadata {
-  cuisine?: string;
   openingHours?: string;
-  website?: string;
-  sourceType?: 'node' | 'way' | 'relation';
   distanceMeters?: number;
   distanceKm?: number;
   distanceUpdatedAt?: number;
   distanceFrom?: { lat: number; lng: number };
   inSunNow?: boolean;
   sunStatusUpdatedAt?: number;
-  rawTags?: Record<string, string>;
 }
 
 export interface Cafe {
@@ -117,6 +113,5 @@ export interface Cafe {
   name: string;
   lat: number;
   lng: number;
-  area?: string;
   metadata?: CafeMetadata;
 }

@@ -297,7 +297,8 @@ def _slot_range(start: int, end: int) -> dict:
 
 async def compute_all_sun_windows(target_date: date | None = None) -> None:
     if target_date is None:
-        target_date = date.today()
+        from zoneinfo import ZoneInfo
+        target_date = datetime.now(ZoneInfo("Europe/Copenhagen")).date()
 
     logger.info(f"=== Starting sun window computation for {target_date} ===")
 
@@ -362,65 +363,3 @@ async def compute_all_sun_windows(target_date: date | None = None) -> None:
         )
     logger.info(f"=== Done. Upserted sun windows for {len(results)} cafes ===")
 
-
-# ---------------------------------------------------------------------------
-# One-off: sync cafes from Overpass → DB
-# ---------------------------------------------------------------------------
-
-async def sync_cafes_from_overpass() -> None:
-    b = COPENHAGEN_BBOX
-    query = f"""
-[out:json][timeout:25];
-(
-  node["amenity"="cafe"]({b['south']},{b['west']},{b['north']},{b['east']});
-  way["amenity"="cafe"]({b['south']},{b['west']},{b['north']},{b['east']});
-  relation["amenity"="cafe"]({b['south']},{b['west']},{b['north']},{b['east']});
-);
-out center tags;
-"""
-    elements = await _overpass_post(query)
-    if not elements:
-        logger.warning("No cafes fetched from Overpass")
-        return
-
-    rows = []
-    for el in elements:
-        lat = el.get("lat") or (el.get("center") or {}).get("lat")
-        lng = el.get("lon") or (el.get("center") or {}).get("lon")
-        if lat is None or lng is None:
-            continue
-        tags = el.get("tags", {})
-        rows.append({
-            "id": f"{el['type']}/{el['id']}",
-            "name": tags.get("name", "Cafe"),
-            "lat": lat,
-            "lng": lng,
-            "area": (tags.get("addr:suburb") or tags.get("addr:neighbourhood") or
-                     tags.get("addr:city_district") or tags.get("addr:city")),
-            "opening_hours": tags.get("opening_hours") or tags.get("contact:opening_hours"),
-            "cuisine": tags.get("cuisine"),
-            "website": tags.get("website") or tags.get("contact:website"),
-        })
-
-    supabase = get_service_client()
-
-    # Fetch IDs of cafes that have been manually moved — preserve their positions.
-    moved_res = supabase.table("cafes").select("id").eq("moved", True).execute()
-    moved_ids = {row["id"] for row in (moved_res.data or [])}
-    if moved_ids:
-        logger.info(f"Skipping lat/lng update for {len(moved_ids)} manually moved cafes")
-
-    # For moved cafes: upsert everything except lat/lng so metadata stays fresh.
-    rows_moved   = [
-        {k: v for k, v in r.items() if k not in ("lat", "lng")}
-        for r in rows if r["id"] in moved_ids
-    ]
-    # For untouched cafes: full upsert including lat/lng.
-    rows_normal  = [r for r in rows if r["id"] not in moved_ids]
-
-    for i in range(0, len(rows_normal), 500):
-        supabase.table("cafes").upsert(rows_normal[i:i + 500]).execute()
-    for i in range(0, len(rows_moved), 500):
-        supabase.table("cafes").upsert(rows_moved[i:i + 500]).execute()
-
-    logger.info(f"Synced {len(rows)} cafes to DB ({len(rows_moved)} positions preserved)")
