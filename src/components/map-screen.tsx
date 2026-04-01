@@ -832,8 +832,9 @@ export default function MapScreen() {
 
   const handleSelectCafe = useCallback((cafe: Cafe) => {
     Keyboard.dismiss();
+    setSelectedCafe(cafe);
     webviewRef.current?.injectJavaScript(
-      buildPostMessage({ type: 'FLY_TO', lat: cafe.lat, lng: cafe.lng }),
+      buildPostMessage({ type: 'SELECT_CAFE', id: cafe.id, lat: cafe.lat, lng: cafe.lng, zoom: 16.8 }),
     );
     setSearchQuery('');
   }, []);

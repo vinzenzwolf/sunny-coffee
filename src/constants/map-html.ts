@@ -954,6 +954,17 @@ export const MAP_HTML = `<!DOCTYPE html>
           renderCafeMarkers();
           break;
 
+        case 'SELECT_CAFE':
+          if (msg && typeof msg.id === 'string' && msg.id.length > 0) {
+            selectedCafeId = msg.id;
+            renderCafeMarkers();
+          }
+          if (typeof msg.lat === 'number' && typeof msg.lng === 'number') {
+            var targetZoom = typeof msg.zoom === 'number' ? msg.zoom : 16.8;
+            map.flyTo({ center: [msg.lng, msg.lat], zoom: targetZoom, duration: 1000 });
+          }
+          break;
+
         case 'SET_LOCATION': {
           var locSrc = map.getSource('user-location');
           if (locSrc && typeof msg.lat === 'number' && typeof msg.lng === 'number') {
