@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { Alert } from 'react-native';
 import { useAuth } from './auth-context';
 import { supabase } from '../services/supabase';
 
@@ -34,7 +35,13 @@ export function SavedCafesProvider({ children }: { children: React.ReactNode }) 
   }, [user?.id]);
 
   const toggle = useCallback(async (cafeId: string) => {
-    if (!user) return;
+    if (!user) {
+      Alert.alert(
+        'Sign in required',
+        'You need to sign in to save cafes.',
+      );
+      return;
+    }
 
     const alreadySaved = savedIds.has(cafeId);
 
