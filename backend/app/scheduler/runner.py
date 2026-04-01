@@ -3,7 +3,6 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from app.scheduler.sun_windows import (
     compute_all_sun_windows,
-    sync_cafes_from_overpass,
     sync_buildings_from_overpass,
 )
 
@@ -22,16 +21,7 @@ def create_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    # Sync cafes from Overpass every Monday at 00:30 CET (after buildings sync)
-    scheduler.add_job(
-        sync_cafes_from_overpass,
-        CronTrigger(day_of_week="mon", hour=0, minute=30, timezone="Europe/Copenhagen"),
-        id="sync_cafes",
-        name="Sync cafes from Overpass",
-        replace_existing=True,
-    )
-
-    # Compute sun windows every day at 02:00 CET (after cafe sync, uses DB buildings)
+    # Compute sun windows every day at 02:00 CET
     scheduler.add_job(
         compute_all_sun_windows,
         CronTrigger(hour=2, minute=0, timezone="Europe/Copenhagen"),
