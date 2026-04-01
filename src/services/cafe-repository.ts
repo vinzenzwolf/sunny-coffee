@@ -10,6 +10,7 @@ type SupabaseCafeRow = {
   name: string;
   lat: number;
   lng: number;
+  google_formatted_address: string | null;
 };
 
 type GeoPoint = {
@@ -29,13 +30,14 @@ function rowToCafe(row: SupabaseCafeRow): Cafe {
     name: row.name || 'Cafe',
     lat: row.lat,
     lng: row.lng,
+    googleFormattedAddress: row.google_formatted_address,
   };
 }
 
 export async function fetchCafesFromSupabase(): Promise<Cafe[]> {
   const { data, error } = await supabase
     .from('cafes')
-    .select('id, name, lat, lng');
+    .select('id, name, lat, lng, google_formatted_address');
   if (error) throw new Error(error.message);
   return (data as SupabaseCafeRow[]).map(rowToCafe);
 }

@@ -12,7 +12,6 @@
  *   EXPO_PUBLIC_GOOGLE_PLACES_API_KEY
  *
  * Optional env vars:
- *   CAFE_TABLE            (overrides auto-detection)
  *   PAGE_SIZE             (default: 200)
  *   REQUEST_DELAY_MS      (default: 150)
  *   MAX_UPDATES           (default: unlimited)
@@ -69,34 +68,10 @@ if (!SUPABASE_URL || !SUPABASE_KEY || !GOOGLE_API_KEY) {
 }
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+const TABLE_NAME = 'cafes';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function isMissingTableError(message: string): boolean {
-  const lower = message.toLowerCase();
-  return (
-    lower.includes('relation') && lower.includes('does not exist')
-  ) || lower.includes('could not find the table');
-}
-
-async function detectTableName(): Promise<string> {
-  const preferred = process.env.CAFE_TABLE?.trim();
-  const candidates = [preferred, 'caffees', 'cafes'].filter(
-    (name, idx, arr): name is string => Boolean(name) && arr.indexOf(name) === idx,
-  );
-
-  for (const tableName of candidates) {
-    const { error } = await supabase.from(tableName).select('id', { head: true, count: 'exact' }).limit(1);
-    if (!error) return tableName;
-    if (isMissingTableError(error.message)) continue;
-    throw new Error(`Cannot access table "${tableName}": ${error.message}`);
-  }
-
-  throw new Error(
-    `Could not find a cafes table. Tried: ${candidates.join(', ')}. Set CAFE_TABLE explicitly if needed.`,
-  );
 }
 
 async function fetchFormattedAddress(placeId: string): Promise<string | null> {
@@ -118,8 +93,7 @@ async function fetchFormattedAddress(placeId: string): Promise<string | null> {
 }
 
 async function main(): Promise<void> {
-  const tableName = await detectTableName();
-  console.log(`Using table: public.${tableName}`);
+  console.log(`Using table: public.${TABLE_NAME}`);
 
   let offset = 0;
   let scanned = 0;
@@ -131,7 +105,7 @@ async function main(): Promise<void> {
   while (updated < MAX_UPDATES) {
     const upper = offset + PAGE_SIZE - 1;
     const { data, error } = await supabase
-      .from(tableName)
+      .from(TABLE_NAME)
       .select('id,name,google_formatted_address')
       .order('id', { ascending: true })
       .range(offset, upper);
@@ -139,7 +113,7 @@ async function main(): Promise<void> {
     if (error) {
       if (error.message.toLowerCase().includes('google_formatted_address')) {
         throw new Error(
-          `Column google_formatted_address missing on public.${tableName}. Run backend/migrations/003_add_google_formatted_address.sql first.`,
+          `Column google_formatted_address missing on public.${TABLE_NAME}. Run backend/migrations/003_add_google_formatted_address.sql first.`,
         );
       }
       throw new Error(`Failed to read cafes: ${error.message}`);
@@ -174,7 +148,7 @@ async function main(): Promise<void> {
 
         if (!DRY_RUN) {
           const { error: updateError } = await supabase
-            .from(tableName)
+            .from(TABLE_NAME)
             .update({ google_formatted_address: formattedAddress })
             .eq('id', row.id);
           if (updateError) throw new Error(updateError.message);

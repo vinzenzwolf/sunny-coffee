@@ -28,6 +28,7 @@ import * as Location from 'expo-location';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   GestureResponderEvent,
+  Keyboard,
   LayoutChangeEvent,
   Linking,
   TextInput,
@@ -501,7 +502,9 @@ function SearchBar({
               <Ionicons name="cafe-outline" size={14} color="#9A9690" />
               <View style={styles.searchResultTextWrap}>
                 <Text numberOfLines={1} style={styles.searchResultTitle}>{cafe.name || 'Cafe'}</Text>
-                <Text numberOfLines={1} style={styles.searchResultSubtitle}>Copenhagen</Text>
+                <Text numberOfLines={1} style={styles.searchResultSubtitle}>
+                  {cafe.googleFormattedAddress || 'Copenhagen'}
+                </Text>
               </View>
               <Ionicons name="chevron-forward" size={14} color="#C0BCB8" />
             </TouchableOpacity>
@@ -751,6 +754,7 @@ export default function MapScreen() {
   }, []);
 
   const handleSelectCafe = useCallback((cafe: Cafe) => {
+    Keyboard.dismiss();
     webviewRef.current?.injectJavaScript(
       buildPostMessage({ type: 'FLY_TO', lat: cafe.lat, lng: cafe.lng }),
     );

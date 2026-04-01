@@ -113,5 +113,6 @@ export interface Cafe {
   name: string;
   lat: number;
   lng: number;
+  googleFormattedAddress?: string | null;
   metadata?: CafeMetadata;
 }
