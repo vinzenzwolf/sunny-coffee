@@ -19,7 +19,6 @@ from datetime import date, datetime, timedelta, timezone
 from math import tan, radians, cos, sin
 from typing import Any
 
-import httpx
 from pysolar.solar import get_altitude, get_azimuth
 from shapely.geometry import Point, Polygon, box as shapely_box
 from shapely.ops import unary_union
@@ -29,8 +28,6 @@ from app.db import get_pool, get_service_client
 
 logger = logging.getLogger(__name__)
 
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
-COPENHAGEN_BBOX = {"south": 55.60, "west": 12.45, "north": 55.74, "east": 12.73}
 EARTH_CIRC_M = 111_320
 MIN_SUN_ALTITUDE_DEG = 1.0
 MAX_SHADOW_LENGTH_M = 400.0
@@ -63,80 +60,6 @@ def _worker_compute(args: tuple) -> dict:
         "date": target_date_str,
         "intervals": intervals,
     }
-
-
-# ---------------------------------------------------------------------------
-# Overpass helpers
-# ---------------------------------------------------------------------------
-
-async def _overpass_post(query: str, timeout: int = 60) -> list[dict]:
-    """POST to Overpass with 3 retries. Returns elements list or [] on failure."""
-    for attempt in range(3):
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                res = await client.post(OVERPASS_URL, data={"data": query})
-                res.raise_for_status()
-                return res.json().get("elements", [])
-        except (httpx.HTTPStatusError, httpx.TimeoutException) as e:
-            if attempt == 2:
-                logger.warning(f"Overpass unavailable after 3 attempts ({e}), skipping")
-                return []
-            wait = 10 * (attempt + 1)
-            logger.warning(f"Overpass error ({e}), retrying in {wait}s...")
-            await asyncio.sleep(wait)
-    return []
-
-
-def _resolve_height(tags: dict) -> float:
-    if "height" in tags:
-        try:
-            return float(tags["height"].split()[0])
-        except ValueError:
-            pass
-    if "building:levels" in tags:
-        try:
-            return float(tags["building:levels"]) * 3.0
-        except ValueError:
-            pass
-    return 10.0
-
-
-# ---------------------------------------------------------------------------
-# Sync buildings from Overpass → DB (run weekly)
-# ---------------------------------------------------------------------------
-
-async def sync_buildings_from_overpass() -> None:
-    """Fetch building footprints from Overpass and store in the buildings table."""
-    b = COPENHAGEN_BBOX
-    query = f"""
-[out:json][timeout:60];
-way["building"]({b['south']},{b['west']},{b['north']},{b['east']});
-out geom tags;
-"""
-    logger.info("Syncing buildings from Overpass...")
-    elements = await _overpass_post(query, timeout=90)
-    if not elements:
-        logger.warning("No buildings fetched — DB unchanged")
-        return
-
-    rows = []
-    for el in elements:
-        if el.get("type") != "way" or "geometry" not in el:
-            continue
-        coords = [[n["lon"], n["lat"]] for n in el["geometry"]]
-        if len(coords) < 3:
-            continue
-        tags = el.get("tags", {})
-        rows.append({
-            "id": f"way/{el['id']}",
-            "coords": coords,
-            "height_m": _resolve_height(tags),
-        })
-
-    supabase = get_service_client()
-    for i in range(0, len(rows), 500):
-        supabase.table("buildings").upsert(rows[i:i + 500]).execute()
-    logger.info(f"Synced {len(rows)} buildings to DB")
 
 
 # ---------------------------------------------------------------------------
