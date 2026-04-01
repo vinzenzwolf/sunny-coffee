@@ -33,6 +33,7 @@ import {
   LayoutChangeEvent,
   Linking,
   PanResponder,
+  ScrollView,
   TextInput,
   Platform,
   StatusBar,
@@ -541,14 +542,37 @@ function SearchBar({
   onLocateMe?: () => void;
   canLocate?: boolean;
 }) {
+  const [isFocused, setIsFocused] = useState(false);
+  const { height: windowHeight } = useWindowDimensions();
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const hasQuery = query.trim().length > 0;
   const showResults = hasQuery && results.length > 0;
+  const resultsMaxHeight = useMemo(() => {
+    const searchTopRowHeight = 48;
+    const spacingUnderSearch = 18;
+    const keyboardOffset = keyboardHeight > 0 ? keyboardHeight + 8 : 0;
+    const available = windowHeight - top - searchTopRowHeight - spacingUnderSearch - keyboardOffset;
+    return Math.max(96, Math.min(available, 360));
+  }, [keyboardHeight, top, windowHeight]);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener('keyboardDidShow', (event) => {
+      setKeyboardHeight(event.endCoordinates?.height ?? 0);
+    });
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   return (
     <View style={[styles.searchRow, { top }]}>
       <View style={styles.searchTopRow}>
-        <View style={styles.searchBar}>
-          <Ionicons name="search-outline" size={15} color="#C0BCB6" />
+        <View style={[styles.searchBar, isFocused && styles.searchBarFocused]}>
+          <Ionicons name="search-outline" size={16} color={isFocused ? '#AE8550' : '#AFA79C'} />
           <TextInput
             value={query}
             onChangeText={onQueryChange}
@@ -558,6 +582,8 @@ function SearchBar({
             autoCorrect={false}
             autoCapitalize="none"
             returnKeyType="search"
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
             onSubmitEditing={() => {
               if (results.length > 0) onSelectCafe(results[0]);
             }}
@@ -586,22 +612,29 @@ function SearchBar({
       </View>
       {showResults && (
         <View style={styles.searchResults}>
-          {results.map((cafe) => (
-            <TouchableOpacity
-              key={cafe.id}
-              style={styles.searchResultItem}
-              activeOpacity={0.7}
-              onPress={() => onSelectCafe(cafe)}
-            >
-              <View style={styles.searchResultTextWrap}>
-                <Text numberOfLines={1} style={styles.searchResultTitle}>{cafe.name || 'Cafe'}</Text>
-                <Text numberOfLines={1} style={styles.searchResultSubtitle}>
-                  {cafe.googleFormattedAddress || 'Copenhagen'}
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={14} color="#C0BCB8" />
-            </TouchableOpacity>
-          ))}
+          <ScrollView
+            style={{ maxHeight: resultsMaxHeight }}
+            contentContainerStyle={styles.searchResultsContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={results.length > 4}
+            nestedScrollEnabled
+          >
+            {results.map((cafe) => (
+              <TouchableOpacity
+                key={cafe.id}
+                style={styles.searchResultItem}
+                activeOpacity={0.7}
+                onPress={() => onSelectCafe(cafe)}
+              >
+                <View style={styles.searchResultTextWrap}>
+                  <Text numberOfLines={1} style={styles.searchResultTitle}>{cafe.name || 'Cafe'}</Text>
+                  <Text numberOfLines={1} style={styles.searchResultSubtitle}>
+                    {cafe.googleFormattedAddress || 'Copenhagen'}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
         </View>
       )}
     </View>
@@ -1161,92 +1194,108 @@ const styles = StyleSheet.create({
   },
   searchBar: {
     flex: 1,
-    height: 44,
-    backgroundColor: '#fff',
-    borderRadius: 40,
+    height: 48,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(225,217,206,0.95)',
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    gap: 8,
+    paddingHorizontal: 15,
+    gap: 9,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
+        shadowOffset: { width: 0, height: 8 },
         shadowOpacity: 0.08,
-        shadowRadius: 12,
+        shadowRadius: 14,
       },
-      android: { elevation: 3 },
+      android: { elevation: 5 },
+    }),
+  },
+  searchBarFocused: {
+    borderColor: '#D8B07A',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#D0A468',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.18,
+        shadowRadius: 16,
+      },
+      android: { elevation: 7 },
     }),
   },
   searchInput: {
     flex: 1,
-    fontSize: 13,
+    fontSize: 14,
     color: '#1C1B19',
-    fontWeight: '400',
+    fontWeight: '500',
     paddingVertical: 0,
   },
   searchClearBtn: {
-    marginLeft: 2,
+    marginLeft: 1,
   },
   locBtn: {
-    width: 44,
-    height: 44,
-    backgroundColor: '#fff',
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(225,217,206,0.95)',
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
+        shadowOffset: { width: 0, height: 8 },
         shadowOpacity: 0.08,
-        shadowRadius: 12,
+        shadowRadius: 14,
       },
-      android: { elevation: 3 },
+      android: { elevation: 5 },
     }),
   },
   locBtnDisabled: {
     opacity: 0.45,
   },
   searchResults: {
-    marginTop: 8,
-    backgroundColor: '#fff',
-    borderRadius: 16,
+    marginTop: 10,
+    backgroundColor: 'rgba(255,255,255,0.97)',
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#ECE8E2',
+    borderColor: '#E9E2D8',
     overflow: 'hidden',
     ...Platform.select({
       ios: {
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.1,
-        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.12,
+        shadowRadius: 18,
       },
-      android: { elevation: 5 },
+      android: { elevation: 7 },
     }),
   },
   searchResultItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#ECE8E2',
+    borderBottomColor: '#EFE8DE',
+  },
+  searchResultsContent: {
+    paddingVertical: 2,
   },
   searchResultTextWrap: {
     flex: 1,
   },
   searchResultTitle: {
-    fontSize: 13,
+    fontSize: 14,
     color: '#1C1B19',
-    fontWeight: '500',
+    fontWeight: '600',
   },
   searchResultSubtitle: {
-    marginTop: 1,
-    fontSize: 11,
-    color: '#9A9690',
+    marginTop: 2,
+    fontSize: 12,
+    color: '#8D867B',
   },
 
   // Bottom nav
