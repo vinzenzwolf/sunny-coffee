@@ -27,16 +27,19 @@
 import * as Location from 'expo-location';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Animated,
   GestureResponderEvent,
   Keyboard,
   LayoutChangeEvent,
   Linking,
+  PanResponder,
   TextInput,
   Platform,
   StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -93,7 +96,8 @@ type WebViewMessage =
 // Nav items config
 // ---------------------------------------------------------------------------
 
-type NavItem = { key: string; label: string; icon: keyof typeof Ionicons.glyphMap; iconActive: keyof typeof Ionicons.glyphMap };
+type NavKey = 'map' | 'explore' | 'saved' | 'profile';
+type NavItem = { key: NavKey; label: string; icon: keyof typeof Ionicons.glyphMap; iconActive: keyof typeof Ionicons.glyphMap };
 
 const NAV_ITEMS: NavItem[] = [
   { key: 'map',     label: 'Map',     icon: 'map-outline',      iconActive: 'map' },
@@ -101,6 +105,8 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'saved',   label: 'Saved',   icon: 'bookmark-outline', iconActive: 'bookmark' },
   { key: 'profile', label: 'Profile', icon: 'person-outline',   iconActive: 'person' },
 ];
+const NAV_KEYS: NavKey[] = NAV_ITEMS.map((item) => item.key);
+const TAB_ANIMATION_DURATION_MS = 320;
 const TOOLTIP_WIDTH = 52;
 const VC_SLIDER_TOUCH_INSET_X = 8;
 
@@ -603,14 +609,29 @@ function SearchBar({
 function BottomNav({
   activeKey,
   onPress,
+  onSwipe,
   bottom,
 }: {
-  activeKey: string;
-  onPress: (key: string) => void;
+  activeKey: NavKey;
+  onPress: (key: NavKey) => void;
+  onSwipe: (direction: 'left' | 'right') => void;
   bottom: number;
 }) {
+  const panResponder = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponder: (_evt, gesture) => (
+      Math.abs(gesture.dx) > 12 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.2
+    ),
+    onPanResponderRelease: (_evt, gesture) => {
+      const swipedFarEnough = Math.abs(gesture.dx) > 40;
+      const swipedFastEnough = Math.abs(gesture.vx) > 0.2;
+      if (!swipedFarEnough && !swipedFastEnough) return;
+      if (gesture.dx < 0) onSwipe('left');
+      else onSwipe('right');
+    },
+  }), [onSwipe]);
+
   return (
-    <View style={[styles.bnav, { bottom }]}>
+    <View style={[styles.bnav, { bottom }]} {...panResponder.panHandlers}>
       <View style={styles.bnavShimmer} />
       {NAV_ITEMS.map((item) => {
         const isActive = item.key === activeKey;
@@ -643,6 +664,7 @@ function BottomNav({
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
+  const { width: screenWidth } = useWindowDimensions();
   const webviewRef = useRef<WebView>(null);
   const { cafes, updateSunStatus } = useCafeData();
   const { useMyLocation, loading: locationSettingsLoading } = useLocationSettings();
@@ -655,7 +677,9 @@ export default function MapScreen() {
   const [isLoading, setIsLoading] = useState(false);
 
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  const [activeNav, setActiveNav] = useState('map');
+  const [activeNav, setActiveNav] = useState<NavKey>('map');
+  const tabSlideX = useRef(new Animated.Value(0)).current;
+  const prevScreenWidthRef = useRef(screenWidth);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
 
   const DEFAULT_LAT = 55.6761;
@@ -675,9 +699,6 @@ export default function MapScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const locationSubRef = useRef<Location.LocationSubscription | null>(null);
   const hasInitialCameraFocusRef = useRef(false);
-  const showExplore = activeNav === 'explore';
-  const showSaved = activeNav === 'saved';
-  const showProfile = activeNav === 'profile';
   const trimmedQuery = searchQuery.trim().toLowerCase();
   const searchResults = trimmedQuery
     ? cafes
@@ -723,6 +744,13 @@ export default function MapScreen() {
       locationSubRef.current?.remove();
     };
   }, [sendDateToMap]);
+
+  useEffect(() => {
+    if (prevScreenWidthRef.current === screenWidth) return;
+    prevScreenWidthRef.current = screenWidth;
+    const index = NAV_KEYS.indexOf(activeNav);
+    tabSlideX.setValue(-index * screenWidth);
+  }, [activeNav, screenWidth, tabSlideX]);
 
   // On startup, focus camera on current user location; fallback to city center if unavailable.
   useEffect(() => {
@@ -926,6 +954,26 @@ export default function MapScreen() {
     setSearchQuery('');
   }, []);
 
+  const animateToTab = useCallback((targetKey: NavKey) => {
+    const targetIndex = NAV_KEYS.indexOf(targetKey);
+    if (targetIndex < 0) return;
+    setActiveNav(targetKey);
+    Animated.timing(tabSlideX, {
+      toValue: -targetIndex * screenWidth,
+      duration: TAB_ANIMATION_DURATION_MS,
+      useNativeDriver: true,
+    }).start();
+  }, [screenWidth, tabSlideX]);
+
+  const handleTabSwipe = useCallback((direction: 'left' | 'right') => {
+    const currentIndex = NAV_KEYS.indexOf(activeNav);
+    if (currentIndex < 0) return;
+    const delta = direction === 'left' ? 1 : -1;
+    const nextIndex = Math.max(0, Math.min(NAV_KEYS.length - 1, currentIndex + delta));
+    if (nextIndex === currentIndex) return;
+    animateToTab(NAV_KEYS[nextIndex]);
+  }, [activeNav, animateToTab]);
+
   // ─── Toasts ───────────────────────────────────────────────────────────
 
   function pushToast(level: ToastMessage['level'], message: string): void {
@@ -968,41 +1016,82 @@ export default function MapScreen() {
         onError={(e) => pushToast('error', `WebView: ${e.nativeEvent.description}`)}
       />
 
-      {/* Search bar */}
-      {!showExplore && !showSaved && !showProfile && (
-        <SearchBar
-          top={searchBarTop}
-          query={searchQuery}
-          results={searchResults}
-          onQueryChange={setSearchQuery}
-          onSelectCafe={handleSelectCafe}
-          onLocateMe={handleLocateMe}
-          canLocate={useMyLocation && !!userLocation}
-        />
-      )}
+      <View style={styles.tabViewport} pointerEvents="box-none">
+        <Animated.View
+          pointerEvents="box-none"
+          style={[
+            styles.tabPager,
+            {
+              width: screenWidth * NAV_KEYS.length,
+              transform: [{ translateX: tabSlideX }],
+            },
+          ]}
+        >
+          <View style={[styles.tabPage, { width: screenWidth }]} pointerEvents="box-none">
+            <SearchBar
+              top={searchBarTop}
+              query={searchQuery}
+              results={searchResults}
+              onQueryChange={setSearchQuery}
+              onSelectCafe={handleSelectCafe}
+              onLocateMe={handleLocateMe}
+              canLocate={useMyLocation && !!userLocation}
+            />
+            {selectedCafe ? (
+              <VenueCard
+                cafe={selectedCafe}
+                date={date}
+                bottom={cardBottom}
+                sunriseMinutes={sunriseMinutes}
+                sunsetMinutes={sunsetMinutes}
+                onDismiss={handleDismissCafe}
+                onDateChange={handleDateChange}
+                onSetNow={handleSetNow}
+                isLive={isLiveTime}
+                onScrubStart={handleScrubStart}
+                onScrubEnd={handleScrubEnd}
+              />
+            ) : (
+              <TimeControls
+                date={date}
+                buildingCount={buildingCount}
+                isLoading={isLoading || !mapReady}
+                bottom={cardBottom}
+                sunriseMinutes={sunriseMinutes}
+                sunsetMinutes={sunsetMinutes}
+                onDateChange={handleDateChange}
+                onSetNow={handleSetNow}
+                isLive={isLiveTime}
+                onScrubStart={handleScrubStart}
+                onScrubEnd={handleScrubEnd}
+              />
+            )}
+          </View>
 
-      {showExplore && (
-        <ExploreTab
-          topInset={insets.top}
-          bottomInset={cardBottom}
-          cafes={cafes}
-        />
-      )}
+          <View style={[styles.tabPage, { width: screenWidth }]}>
+            <ExploreTab
+              topInset={insets.top}
+              bottomInset={cardBottom}
+              cafes={cafes}
+            />
+          </View>
 
-      {showSaved && (
-        <SavedTab
-          topInset={insets.top}
-          bottomInset={cardBottom}
-          onBrowse={() => setActiveNav('explore')}
-        />
-      )}
+          <View style={[styles.tabPage, { width: screenWidth }]}>
+            <SavedTab
+              topInset={insets.top}
+              bottomInset={cardBottom}
+              onBrowse={() => animateToTab('explore')}
+            />
+          </View>
 
-      {showProfile && (
-        <ProfileTab
-          topInset={insets.top}
-          bottomInset={cardBottom}
-        />
-      )}
+          <View style={[styles.tabPage, { width: screenWidth }]}>
+            <ProfileTab
+              topInset={insets.top}
+              bottomInset={cardBottom}
+            />
+          </View>
+        </Animated.View>
+      </View>
 
       {/* Toast messages */}
       {toasts.length > 0 && (
@@ -1020,43 +1109,11 @@ export default function MapScreen() {
         </View>
       )}
 
-      {/* Time / shadow controls */}
-      {!showExplore && !showSaved && !showProfile && (
-        selectedCafe ? (
-          <VenueCard
-            cafe={selectedCafe}
-            date={date}
-            bottom={cardBottom}
-            sunriseMinutes={sunriseMinutes}
-            sunsetMinutes={sunsetMinutes}
-            onDismiss={handleDismissCafe}
-            onDateChange={handleDateChange}
-            onSetNow={handleSetNow}
-            isLive={isLiveTime}
-            onScrubStart={handleScrubStart}
-            onScrubEnd={handleScrubEnd}
-          />
-        ) : (
-          <TimeControls
-            date={date}
-            buildingCount={buildingCount}
-            isLoading={isLoading || !mapReady}
-            bottom={cardBottom}
-            sunriseMinutes={sunriseMinutes}
-            sunsetMinutes={sunsetMinutes}
-            onDateChange={handleDateChange}
-            onSetNow={handleSetNow}
-            isLive={isLiveTime}
-            onScrubStart={handleScrubStart}
-            onScrubEnd={handleScrubEnd}
-          />
-        )
-      )}
-
       {/* Bottom navigation */}
       <BottomNav
         activeKey={activeNav}
-        onPress={setActiveNav}
+        onPress={animateToTab}
+        onSwipe={handleTabSwipe}
         bottom={navBottom}
       />
     </View>
@@ -1074,6 +1131,18 @@ const styles = StyleSheet.create({
   },
   webview: {
     flex: 1,
+  },
+  tabViewport: {
+    ...StyleSheet.absoluteFillObject,
+    overflow: 'hidden',
+    zIndex: 12,
+  },
+  tabPager: {
+    ...StyleSheet.absoluteFillObject,
+    flexDirection: 'row',
+  },
+  tabPage: {
+    height: '100%',
   },
 
   // Search bar
