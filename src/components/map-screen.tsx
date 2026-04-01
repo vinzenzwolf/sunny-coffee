@@ -115,10 +115,35 @@ function HeartButton({ cafeId }: { cafeId: string }) {
   );
 }
 
-function DirectionsButton({ lat, lng }: { lat: number; lng: number }) {
-  const handlePress = () => {
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=walking`;
-    Linking.openURL(url);
+function DirectionsButton({ cafeId, lat, lng }: { cafeId: string; lat: number; lng: number }) {
+  const handlePress = async () => {
+    const apiKey = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY;
+
+    if (apiKey && cafeId) {
+      try {
+        const res = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(cafeId)}`, {
+          headers: {
+            'X-Goog-Api-Key': apiKey,
+            'X-Goog-FieldMask': 'googleMapsUri',
+          },
+        });
+        if (res.ok) {
+          const data = (await res.json()) as { googleMapsUri?: string };
+          if (data.googleMapsUri) {
+            await Linking.openURL(data.googleMapsUri);
+            return;
+          }
+        }
+      } catch {
+        // Fallback below.
+      }
+    }
+
+    if (cafeId) {
+      await Linking.openURL(`https://www.google.com/maps/place/?q=place_id:${encodeURIComponent(cafeId)}`);
+      return;
+    }
+    await Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`);
   };
   return (
     <TouchableOpacity style={vcStyles.arrow} onPress={handlePress} activeOpacity={0.8}>
@@ -225,7 +250,7 @@ function VenueCard({
           )}
         </View>
         <View style={vcStyles.buttonRow}>
-          <DirectionsButton lat={cafe.lat} lng={cafe.lng} />
+          <DirectionsButton cafeId={cafe.id} lat={cafe.lat} lng={cafe.lng} />
           <HeartButton cafeId={cafe.id} />
         </View>
       </View>
