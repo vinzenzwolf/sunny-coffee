@@ -72,6 +72,10 @@ function uniqueId(): string {
   return Math.random().toString(36).slice(2);
 }
 
+function minuteStamp(date: Date): number {
+  return Math.floor(date.getTime() / 60_000);
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -96,6 +100,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'saved',   label: 'Saved',   icon: 'bookmark-outline', iconActive: 'bookmark' },
   { key: 'profile', label: 'Profile', icon: 'person-outline',   iconActive: 'person' },
 ];
+const TOOLTIP_WIDTH = 52;
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -160,6 +165,8 @@ function VenueCard({
   sunsetMinutes,
   onDismiss,
   onDateChange,
+  onSetNow,
+  isLive,
   onScrubStart,
   onScrubEnd,
 }: {
@@ -170,6 +177,8 @@ function VenueCard({
   sunsetMinutes: number;
   onDismiss: () => void;
   onDateChange: (d: Date) => void;
+  onSetNow?: () => void;
+  isLive?: boolean;
   onScrubStart?: () => void;
   onScrubEnd?: () => void;
 }) {
@@ -186,6 +195,12 @@ function VenueCard({
   const displayedMinutes =
     scrubMinutes ?? Math.min(Math.max(rawMinutes, sunriseMinutes), sunsetMinutes);
   const dayFraction = range > 0 ? (displayedMinutes - sunriseMinutes) / range : 0;
+  const tooltipLeft = (() => {
+    if (!sliderWidth.current) return `${dayFraction * 100}%` as `${number}%`;
+    const x = dayFraction * sliderWidth.current;
+    const clamped = Math.max(0, Math.min(sliderWidth.current - TOOLTIP_WIDTH, x - TOOLTIP_WIDTH / 2));
+    return clamped;
+  })();
   const timeLabel = (() => {
     const h = Math.floor(displayedMinutes / 60);
     const m = displayedMinutes % 60;
@@ -216,7 +231,6 @@ function VenueCard({
     [date, sunriseMinutes, range, onDateChange],
   );
 
-  const inSun = cafe.metadata?.inSunNow;
   const distanceText = (() => {
     const km = cafe.metadata?.distanceKm;
     const m = cafe.metadata?.distanceMeters;
@@ -241,13 +255,6 @@ function VenueCard({
           {metaParts.length > 0 && (
             <Text style={vcStyles.meta} numberOfLines={1}>{metaParts.join(' · ')}</Text>
           )}
-          {inSun !== undefined && (
-            <View style={[vcStyles.tag, inSun ? vcStyles.tagSun : vcStyles.tagShade]}>
-              <Text style={[vcStyles.tagText, inSun ? vcStyles.tagTextSun : vcStyles.tagTextShade]}>
-                {inSun ? '☀ Sunny now' : '☁ In shade'}
-              </Text>
-            </View>
-          )}
         </View>
         <View style={vcStyles.buttonRow}>
           <DirectionsButton cafeId={cafe.id} lat={cafe.lat} lng={cafe.lng} />
@@ -258,11 +265,14 @@ function VenueCard({
       {/* Inset slider */}
       <View style={vcStyles.sliderInset}>
         <View style={vcStyles.sliderHead}>
-          <Text style={vcStyles.sliderLabel}>Sun position</Text>
-          <View style={vcStyles.sliderVal}>
-            <View style={vcStyles.sliderDot} />
-            <Text style={vcStyles.sliderTime}>{timeLabel}</Text>
+          <View style={[vcStyles.stateBadge, isLive ? vcStyles.stateBadgeLive : vcStyles.stateBadgePreview]}>
+            <Text style={[vcStyles.stateBadgeText, isLive ? vcStyles.stateBadgeTextLive : vcStyles.stateBadgeTextPreview]}>
+              {isLive ? 'LIVE' : 'PREVIEW'}
+            </Text>
           </View>
+          <TouchableOpacity style={[vcStyles.nowBtn, isLive && vcStyles.nowBtnHidden]} activeOpacity={0.8} onPress={onSetNow} disabled={isLive}>
+            <Text style={[vcStyles.nowBtnText, isLive && vcStyles.nowBtnTextHidden]}>Now</Text>
+          </TouchableOpacity>
         </View>
         <View
           style={vcStyles.sliderArea}
@@ -299,6 +309,9 @@ function VenueCard({
         >
           <View style={vcStyles.track} pointerEvents="none">
             <View style={[vcStyles.fill, { width: `${dayFraction * 100}%` as `${number}%` }]} />
+            <View style={[vcStyles.thumbTooltip, { left: tooltipLeft }]}>
+              <Text style={vcStyles.thumbTooltipText}>{timeLabel}</Text>
+            </View>
             <View style={[vcStyles.thumb, isScrubbing && vcStyles.thumbActive, { left: `${dayFraction * 100}%` as `${number}%` }]} />
           </View>
         </View>
@@ -368,17 +381,6 @@ const vcStyles = StyleSheet.create({
     color: '#B8B4AF',
     marginBottom: 6,
   },
-  tag: {
-    alignSelf: 'flex-start',
-    borderRadius: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  tagSun: { backgroundColor: '#FEF3E2' },
-  tagShade: { backgroundColor: '#F2F0ED' },
-  tagText: { fontSize: 10, fontWeight: '500' },
-  tagTextSun: { color: '#F5A623' },
-  tagTextShade: { color: '#9A9690' },
   arrow: {
     width: 34,
     height: 34,
@@ -407,32 +409,59 @@ const vcStyles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 12,
   },
-  sliderLabel: {
+  stateBadge: {
+    minHeight: 24,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 0,
+    borderWidth: 1,
+    justifyContent: 'center',
+  },
+  stateBadgeLive: {
+    backgroundColor: '#FEF3E2',
+    borderColor: '#F2C98C',
+  },
+  stateBadgePreview: {
+    backgroundColor: '#F2F0ED',
+    borderColor: '#DDD8D1',
+  },
+  stateBadgeText: {
     fontSize: 10,
-    fontWeight: '600',
-    color: '#B0ADA8',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    fontWeight: '700',
   },
-  sliderVal: {
-    flexDirection: 'row',
+  stateBadgeTextLive: {
+    color: '#D88413',
+  },
+  stateBadgeTextPreview: {
+    color: '#8E8880',
+  },
+  nowBtn: {
+    minWidth: 50,
+    minHeight: 24,
     alignItems: 'center',
-    gap: 5,
+    justifyContent: 'center',
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#DFDAD2',
+    backgroundColor: '#F6F3EF',
+    paddingHorizontal: 10,
+    paddingVertical: 0,
   },
-  sliderDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: '#F5A623',
+  nowBtnHidden: {
+    opacity: 0,
   },
-  sliderTime: {
-    fontSize: 13,
+  nowBtnText: {
+    fontSize: 11,
     fontWeight: '600',
-    color: '#1C1B19',
+    color: '#5E5952',
   },
-  sliderArea: { paddingBottom: 2 },
+  nowBtnTextHidden: {
+    color: 'transparent',
+  },
+  sliderArea: { marginTop: 18, paddingBottom: 2 },
   track: {
     height: 4,
     backgroundColor: '#EAE7E3',
@@ -461,6 +490,21 @@ const vcStyles = StyleSheet.create({
       ios: { shadowColor: '#F5A623', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.45, shadowRadius: 4 },
       android: { elevation: 3 },
     }),
+  },
+  thumbTooltip: {
+    position: 'absolute',
+    bottom: 12,
+    width: TOOLTIP_WIDTH,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: '#1C1B19',
+    alignItems: 'center',
+  },
+  thumbTooltipText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#fff',
   },
   thumbActive: { transform: [{ scale: 1.15 }] },
 });
@@ -752,6 +796,14 @@ export default function MapScreen() {
     [sendDateToMap],
   );
 
+  const handleSetNow = useCallback(() => {
+    const now = new Date();
+    setDate(now);
+    sendDateToMap(now.toISOString());
+  }, [sendDateToMap]);
+
+  const isLiveTime = minuteStamp(date) === minuteStamp(new Date());
+
   const handleScrubStart = useCallback(() => {
     webviewRef.current?.injectJavaScript(
       buildPostMessage({ type: 'SCRUB_START' }),
@@ -890,6 +942,8 @@ export default function MapScreen() {
             sunsetMinutes={sunsetMinutes}
             onDismiss={handleDismissCafe}
             onDateChange={handleDateChange}
+            onSetNow={handleSetNow}
+            isLive={isLiveTime}
             onScrubStart={handleScrubStart}
             onScrubEnd={handleScrubEnd}
           />
@@ -902,6 +956,8 @@ export default function MapScreen() {
             sunriseMinutes={sunriseMinutes}
             sunsetMinutes={sunsetMinutes}
             onDateChange={handleDateChange}
+            onSetNow={handleSetNow}
+            isLive={isLiveTime}
             onScrubStart={handleScrubStart}
             onScrubEnd={handleScrubEnd}
           />

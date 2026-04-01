@@ -5,6 +5,7 @@ import {
   Platform,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from 'react-native';
 
@@ -16,11 +17,14 @@ interface TimeControlsProps {
   sunriseMinutes: number;
   sunsetMinutes: number;
   onDateChange: (newDate: Date) => void;
+  onSetNow?: () => void;
+  isLive?: boolean;
   onScrubStart?: () => void;
   onScrubEnd?: () => void;
 }
 
 const ALL_TICK_HOURS = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21];
+const TOOLTIP_WIDTH = 52;
 
 function padTwo(n: number): string {
   return n.toString().padStart(2, '0');
@@ -43,6 +47,8 @@ export function TimeControls({
   sunriseMinutes,
   sunsetMinutes,
   onDateChange,
+  onSetNow,
+  isLive = true,
   onScrubStart,
   onScrubEnd,
 }: TimeControlsProps) {
@@ -81,6 +87,12 @@ export function TimeControls({
   const range = sunsetMinutes - sunriseMinutes;
   const dayFraction = range > 0 ? (displayedMinutes - sunriseMinutes) / range : 0;
   const displayedHour = Math.floor(displayedMinutes / 60);
+  const tooltipLeft = (() => {
+    if (!sliderWidth.current) return `${dayFraction * 100}%` as `${number}%`;
+    const x = dayFraction * sliderWidth.current;
+    const clamped = Math.max(0, Math.min(sliderWidth.current - TOOLTIP_WIDTH, x - TOOLTIP_WIDTH / 2));
+    return clamped;
+  })();
 
   const tickHours = ALL_TICK_HOURS.filter(
     (h) => h * 60 >= sunriseMinutes && h * 60 <= sunsetMinutes,
@@ -88,13 +100,16 @@ export function TimeControls({
 
   return (
     <View style={[styles.container, { bottom }]}>
-      {/* Header: label left, dot + time right */}
+      {/* Header: status left, now action right (preview only) */}
       <View style={styles.head}>
-        <Text style={styles.label}>Sun position</Text>
-        <View style={styles.val}>
-          <View style={styles.dot} />
-          <Text style={styles.time}>{minutesToTimeString(displayedMinutes)}</Text>
+        <View style={[styles.stateBadge, isLive ? styles.stateBadgeLive : styles.stateBadgePreview]}>
+          <Text style={[styles.stateBadgeText, isLive ? styles.stateBadgeTextLive : styles.stateBadgeTextPreview]}>
+            {isLive ? 'LIVE' : 'PREVIEW'}
+          </Text>
         </View>
+        <TouchableOpacity style={[styles.nowBtn, isLive && styles.nowBtnHidden]} onPress={onSetNow} activeOpacity={0.85} disabled={isLive}>
+          <Text style={[styles.nowBtnText, isLive && styles.nowBtnTextHidden]}>Now</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Slider */}
@@ -133,6 +148,9 @@ export function TimeControls({
       >
         <View style={styles.track} pointerEvents="none">
           <View style={[styles.fill, { width: `${dayFraction * 100}%` as `${number}%` }]} />
+          <View style={[styles.thumbTooltip, { left: tooltipLeft }]}>
+            <Text style={styles.thumbTooltipText}>{minutesToTimeString(displayedMinutes)}</Text>
+          </View>
           <View
             style={[
               styles.thumb,
@@ -194,40 +212,60 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
-  label: {
+  stateBadge: {
+    minHeight: 24,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 0,
+    borderWidth: 1,
+    justifyContent: 'center',
+  },
+  stateBadgeLive: {
+    backgroundColor: '#FEF3E2',
+    borderColor: '#F2C98C',
+  },
+  stateBadgePreview: {
+    backgroundColor: '#F2F0ED',
+    borderColor: '#DDD8D1',
+  },
+  stateBadgeText: {
     fontSize: 10,
-    fontWeight: '600',
-    color: '#B0ADA8',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    fontWeight: '700',
   },
-  val: {
-    flexDirection: 'row',
+  stateBadgeTextLive: {
+    color: '#D88413',
+  },
+  stateBadgeTextPreview: {
+    color: '#8E8880',
+  },
+  nowBtn: {
+    minWidth: 50,
+    minHeight: 24,
     alignItems: 'center',
-    gap: 5,
+    justifyContent: 'center',
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#DFDAD2',
+    backgroundColor: '#F6F3EF',
+    paddingHorizontal: 10,
+    paddingVertical: 0,
   },
-  dot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: '#F5A623',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#F5A623',
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 0.6,
-        shadowRadius: 4,
-      },
-    }),
+  nowBtnHidden: {
+    opacity: 0,
   },
-  time: {
-    fontSize: 13,
+  nowBtnText: {
+    fontSize: 11,
     fontWeight: '600',
-    color: '#1C1B19',
+    color: '#5E5952',
+  },
+  nowBtnTextHidden: {
+    color: 'transparent',
   },
 
   // Track + ticks share one touch area
   sliderArea: {
+    marginTop: 18,
     paddingBottom: 2, // ticks sit just below track
   },
   track: {
@@ -263,6 +301,21 @@ const styles = StyleSheet.create({
       },
       android: { elevation: 3 },
     }),
+  },
+  thumbTooltip: {
+    position: 'absolute',
+    bottom: 12,
+    width: TOOLTIP_WIDTH,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: '#1C1B19',
+    alignItems: 'center',
+  },
+  thumbTooltipText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#fff',
   },
   thumbActive: {
     transform: [{ scale: 1.15 }],
