@@ -35,15 +35,6 @@ export const MAP_HTML = `<!DOCTYPE html>
     html, body, #map { width:100%; height:100%; overflow:hidden; }
     .maplibregl-ctrl-bottom-left,
     .maplibregl-ctrl-bottom-right { display:none; }
-    #shadow-canvas {
-      position: absolute;
-      inset: 0;
-      pointer-events: none;
-      z-index: 1;
-    }
-    .maplibregl-marker {
-      z-index: 2;
-    }
     #night-overlay {
       position: absolute;
       inset: 0;
@@ -122,7 +113,6 @@ export const MAP_HTML = `<!DOCTYPE html>
 </head>
 <body>
   <div id="map"></div>
-  <canvas id="shadow-canvas"></canvas>
   <div id="night-overlay"></div>
 
   <script src="https://unpkg.com/maplibre-gl@${MAPLIBRE_VER}/dist/maplibre-gl.js"></script>
@@ -162,8 +152,6 @@ export const MAP_HTML = `<!DOCTYPE html>
   var isScrubbing = false;
   var selectedCafeId = null;
   var nightOverlay = document.getElementById('night-overlay');
-  var shadowCanvas = document.getElementById('shadow-canvas');
-  var shadowCtx = null;
   var lastRawShadowData = { type: 'FeatureCollection', features: [] };
   var cafeFeatures = [];
   var cafeMarkers = [];
@@ -537,56 +525,147 @@ export const MAP_HTML = `<!DOCTYPE html>
     postToRN({ type: 'CAFE_SUN_STATUS', statuses: statuses });
   }
 
-  function initShadowCanvas() {
-    if (!shadowCanvas) return;
-    var container = map.getContainer();
-    // Move canvas inside the map container. Café markers are appended to this
-    // same container later (by renderCafeMarkers), so they'll sit on top in DOM order.
-    container.appendChild(shadowCanvas);
-    var dpr = window.devicePixelRatio || 1;
-    shadowCanvas.width  = container.clientWidth  * dpr;
-    shadowCanvas.height = container.clientHeight * dpr;
-    shadowCanvas.style.width  = container.clientWidth  + 'px';
-    shadowCanvas.style.height = container.clientHeight + 'px';
-    shadowCtx = shadowCanvas.getContext('2d');
-    if (shadowCtx) shadowCtx.scale(dpr, dpr);
-    shadowCanvas.style.opacity = shadowsEnabled ? String(SHADOW_OPACITY) : '0';
+  /* ── lng/lat → Mercator [0,1]² (MapLibre's coordinate space) ─────────────── */
+  function lngLatToMerc(lng, lat) {
+    var x = (lng + 180) / 360;
+    var r = Math.PI / 180;
+    var y = (1 - Math.log(Math.tan(Math.PI / 4 + lat * r / 2)) / Math.PI) / 2;
+    return [x, y];
   }
 
-  function drawShadowCanvas(shadowGeoJSON) {
-    if (!shadowCtx || !shadowCanvas) return;
-    var w = shadowCanvas.width / (window.devicePixelRatio || 1);
-    var h = shadowCanvas.height / (window.devicePixelRatio || 1);
-    shadowCtx.clearRect(0, 0, w, h);
-    if (!shadowsEnabled || !shadowGeoJSON || !shadowGeoJSON.features.length) return;
+  /* ── WebGL shadow custom layer ───────────────────────────────────────────── */
+  // Renders shadow polygons to an offscreen FBO at full opacity (no per-pixel alpha
+  // accumulation = uniform shadow regardless of overlap), then composites the FBO
+  // onto MapLibre's framebuffer at SHADOW_OPACITY. Inserted before building layers
+  // so buildings and café markers always render on top.
+  function createShadowLayer() {
+    var gl, shadowProg, quadProg, shadowVBuf, quadVBuf;
+    var fbo = null, fboTex = null, fboW = 0, fboH = 0;
 
-    shadowCtx.fillStyle = SHADOW_COLOR;
-    shadowCtx.beginPath();
-
-    var features = shadowGeoJSON.features;
-    for (var fi = 0; fi < features.length; fi++) {
-      var geom = features[fi].geometry;
-      // polysCoords: array of polygons, each polygon is array of rings
-      var polysCoords = geom.type === 'Polygon'
-        ? [geom.coordinates]
-        : geom.coordinates; // MultiPolygon
-      for (var pi = 0; pi < polysCoords.length; pi++) {
-        var rings = polysCoords[pi];
-        for (var ri = 0; ri < rings.length; ri++) {
-          var ring = rings[ri];
-          if (!ring.length) continue;
-          var p0 = map.project([ring[0][0], ring[0][1]]);
-          shadowCtx.moveTo(p0.x, p0.y);
-          for (var ci = 1; ci < ring.length; ci++) {
-            var p = map.project([ring[ci][0], ring[ci][1]]);
-            shadowCtx.lineTo(p.x, p.y);
-          }
-          shadowCtx.closePath();
-        }
-      }
+    function compileShader(type, src) {
+      var s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      return s;
     }
-    // nonzero fill: overlapping subpaths are filled once — no alpha stacking.
-    shadowCtx.fill('nonzero');
+    function createProg(vs, fs) {
+      var p = gl.createProgram();
+      gl.attachShader(p, compileShader(gl.VERTEX_SHADER, vs));
+      gl.attachShader(p, compileShader(gl.FRAGMENT_SHADER, fs));
+      gl.linkProgram(p);
+      return p;
+    }
+
+    // Shadow polygon shader: projects Mercator coords via MapLibre's matrix.
+    var SHADOW_VS = 'attribute vec2 a_pos;uniform mat4 u_matrix;void main(){gl_Position=u_matrix*vec4(a_pos,0.0,1.0);}';
+    var SHADOW_FS = 'void main(){gl_FragColor=vec4(0.310,0.373,0.490,1.0);}'; // #4f5f7d
+
+    // Full-screen quad shader: composites the FBO texture with desired opacity.
+    var QUAD_VS = 'attribute vec2 a_pos;varying vec2 v_t;void main(){v_t=a_pos*0.5+0.5;gl_Position=vec4(a_pos,0.0,1.0);}';
+    var QUAD_FS = 'precision mediump float;uniform sampler2D u_tex;uniform float u_opacity;varying vec2 v_t;void main(){vec4 c=texture2D(u_tex,v_t);gl_FragColor=vec4(c.rgb,c.a*u_opacity);}';
+
+    function ensureFBO(w, h) {
+      if (fboTex && fboW === w && fboH === h) return;
+      if (fboTex) { gl.deleteTexture(fboTex); gl.deleteFramebuffer(fbo); }
+      fboTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, fboTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      fbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fboTex, 0);
+      fboW = w; fboH = h;
+    }
+
+    return {
+      id: 'client-shadows',
+      type: 'custom',
+
+      onAdd: function(m, glCtx) {
+        gl = glCtx;
+        shadowProg = createProg(SHADOW_VS, SHADOW_FS);
+        quadProg   = createProg(QUAD_VS,   QUAD_FS);
+        shadowVBuf = gl.createBuffer();
+        quadVBuf   = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, quadVBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+      },
+
+      render: function(glCtx, matrix) {
+        if (!shadowsEnabled || !lastRawShadowData.features.length) return;
+
+        // Build triangle list via fan triangulation (polygons are convex hulls).
+        var verts = [];
+        var features = lastRawShadowData.features;
+        for (var fi = 0; fi < features.length; fi++) {
+          var geom = features[fi].geometry;
+          var polyList = geom.type === 'Polygon' ? [geom.coordinates] : geom.coordinates;
+          for (var pi = 0; pi < polyList.length; pi++) {
+            var ring = polyList[pi][0];
+            if (!ring || ring.length < 3) continue;
+            var m0 = lngLatToMerc(ring[0][0], ring[0][1]);
+            for (var ci = 1; ci + 1 < ring.length; ci++) {
+              var ma = lngLatToMerc(ring[ci][0],   ring[ci][1]);
+              var mb = lngLatToMerc(ring[ci+1][0], ring[ci+1][1]);
+              verts.push(m0[0],m0[1], ma[0],ma[1], mb[0],mb[1]);
+            }
+          }
+        }
+        if (!verts.length) return;
+
+        var canvas = map.getCanvas();
+        var w = canvas.width, h = canvas.height;
+        ensureFBO(w, h);
+
+        // Save MapLibre's current framebuffer so we can restore it for pass 2.
+        var prevFBO = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+
+        // PASS 1 — draw all shadow polygons into FBO with blending OFF.
+        // Each pixel is written at most once → no alpha stacking.
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+        gl.viewport(0, 0, w, h);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.disable(gl.BLEND);
+        gl.disable(gl.STENCIL_TEST);
+
+        gl.useProgram(shadowProg);
+        gl.uniformMatrix4fv(gl.getUniformLocation(shadowProg, 'u_matrix'), false, matrix);
+        gl.bindBuffer(gl.ARRAY_BUFFER, shadowVBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.DYNAMIC_DRAW);
+        var aPos = gl.getAttribLocation(shadowProg, 'a_pos');
+        gl.enableVertexAttribArray(aPos);
+        gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+        gl.drawArrays(gl.TRIANGLES, 0, verts.length / 2);
+
+        // PASS 2 — composite FBO over MapLibre's framebuffer at SHADOW_OPACITY.
+        gl.bindFramebuffer(gl.FRAMEBUFFER, prevFBO);
+        gl.viewport(0, 0, w, h);
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+        gl.useProgram(quadProg);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, fboTex);
+        gl.uniform1i(gl.getUniformLocation(quadProg, 'u_tex'), 0);
+        gl.uniform1f(gl.getUniformLocation(quadProg, 'u_opacity'), SHADOW_OPACITY);
+        gl.bindBuffer(gl.ARRAY_BUFFER, quadVBuf);
+        var qPos = gl.getAttribLocation(quadProg, 'a_pos');
+        gl.enableVertexAttribArray(qPos);
+        gl.vertexAttribPointer(qPos, 2, gl.FLOAT, false, 0, 0);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      },
+
+      onRemove: function(m, glCtx) {
+        if (fboTex)    glCtx.deleteTexture(fboTex);
+        if (fbo)       glCtx.deleteFramebuffer(fbo);
+        if (shadowVBuf) glCtx.deleteBuffer(shadowVBuf);
+        if (quadVBuf)   glCtx.deleteBuffer(quadVBuf);
+      },
+    };
   }
 
   function computeShadowGeoJSON(buildings, sun, refLatDeg, options) {
@@ -671,7 +750,7 @@ export const MAP_HTML = `<!DOCTYPE html>
       var rawShadowData = computeShadowGeoJSON(buildings, sun, center.lat);
       emitCafeSunStatus(rawShadowData, sun.altitude);
       lastRawShadowData = rawShadowData;
-      drawShadowCanvas(rawShadowData);
+      map.triggerRepaint();
       if (nightOverlay) {
         var isNight = sun.altitude < MIN_SUN_ALT_RAD;
         nightOverlay.style.opacity =
@@ -775,7 +854,9 @@ export const MAP_HTML = `<!DOCTYPE html>
       try { map.removeLayer(id); } catch (_) {}
     });
 
-    initShadowCanvas();
+    // Insert shadow custom layer before the first building layer so buildings render on top.
+    var shadowBeforeId = buildingLayerIds.length ? buildingLayerIds[0] : undefined;
+    map.addLayer(createShadowLayer(), shadowBeforeId);
     ensureCafeSource();
     if (cafeFeatures.length) {
       var cafeSrc = map.getSource(CAFE_SOURCE_ID);
@@ -806,11 +887,6 @@ export const MAP_HTML = `<!DOCTYPE html>
     renderCafeMarkers();
     setTimeout(function () { scheduleShadowUpdate(0); }, 250);
     postToRN({ type: 'MAP_READY' });
-  });
-
-  // Redraw canvas every frame during pan/zoom/rotate (just re-projects existing geo coords — fast).
-  map.on('move', function () {
-    drawShadowCanvas(lastRawShadowData);
   });
 
   map.on('moveend', function () {
@@ -845,8 +921,7 @@ export const MAP_HTML = `<!DOCTYPE html>
 
         case 'SET_SHADOWS':
           shadowsEnabled = msg.enabled;
-          if (shadowCanvas) shadowCanvas.style.opacity = shadowsEnabled ? String(SHADOW_OPACITY) : '0';
-          drawShadowCanvas(lastRawShadowData);
+          map.triggerRepaint();
           scheduleShadowUpdate(0);
           break;
 
