@@ -564,7 +564,10 @@ function SearchBar({
           />
           {hasQuery && (
             <TouchableOpacity
-              onPress={() => onQueryChange('')}
+              onPress={() => {
+                onQueryChange('');
+                Keyboard.dismiss();
+              }}
               activeOpacity={0.7}
               style={styles.searchClearBtn}
             >
@@ -590,7 +593,6 @@ function SearchBar({
               activeOpacity={0.7}
               onPress={() => onSelectCafe(cafe)}
             >
-              <Ionicons name="cafe-outline" size={14} color="#9A9690" />
               <View style={styles.searchResultTextWrap}>
                 <Text numberOfLines={1} style={styles.searchResultTitle}>{cafe.name || 'Cafe'}</Text>
                 <Text numberOfLines={1} style={styles.searchResultSubtitle}>
