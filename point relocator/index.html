@@ -704,14 +704,31 @@ function sortGeographically(list) {
 }
 
 async function loadCafes() {
-  const { data, error } = await db.from('cafes').select('*');
-  if (error) {
-    document.getElementById('loading').innerHTML =
-      `<span style="color:#fca5a5">Failed to load: ${error.message}</span>`;
-    return;
+  const PAGE_SIZE = 1000;
+  const allRows = [];
+  let from = 0;
+
+  while (true) {
+    const to = from + PAGE_SIZE - 1;
+    const { data, error } = await db
+      .from('cafes')
+      .select('*')
+      .order('id', { ascending: true })
+      .range(from, to);
+
+    if (error) {
+      document.getElementById('loading').innerHTML =
+        `<span style="color:#fca5a5">Failed to load: ${error.message}</span>`;
+      return;
+    }
+
+    const batch = data || [];
+    allRows.push(...batch);
+    if (batch.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
   }
 
-  cafes = sortGeographically(data);
+  cafes = sortGeographically(allRows);
   cafes.forEach(c => { originalPositions[c.id] = { lat: c.lat, lng: c.lng }; });
   cafes.filter(c => !c.removed).forEach(addMarker);
 
