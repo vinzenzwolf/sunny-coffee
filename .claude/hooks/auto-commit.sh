@@ -16,8 +16,8 @@ fi
 
 DIFF_STAT=$(git diff --cached --stat)
 DIFF_CONTENT=$(git diff --cached -- '*.ts' '*.tsx' '*.py' '*.sql' '*.html' '*.json' | head -200)
-FILES=$(git diff --cached --name-only | head -3 | xargs -I{} basename {} | paste -sd ', ')
-FALLBACK_MSG="Update $FILES"
+FILES=$(git diff --cached --name-only | head -3 | while read -r f; do basename "$f"; done | tr '\n' ',' | sed 's/,$//' | sed 's/,/, /g')
+FALLBACK_MSG="Update ${FILES:-files}"
 COMMIT_MSG=""
 
 if [ -n "$ANTHROPIC_API_KEY" ]; then
@@ -34,7 +34,7 @@ import json, sys
 print(json.dumps(sys.stdin.read()))
 ")
 
-  PAYLOAD="{\"model\":\"claude-haiku-4-5\",\"max_tokens\":100,\"messages\":[{\"role\":\"user\",\"content\":$PROMPT_JSON}]}"
+  PAYLOAD="{\"model\":\"claude-haiku-4-5-20251001\",\"max_tokens\":100,\"messages\":[{\"role\":\"user\",\"content\":$PROMPT_JSON}]}"
 
   RESPONSE=$(curl --silent --fail \
     --max-time 30 \
