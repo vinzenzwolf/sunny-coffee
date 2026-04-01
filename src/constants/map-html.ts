@@ -165,7 +165,6 @@ export const MAP_HTML = `<!DOCTYPE html>
   var shadowCanvas = document.getElementById('shadow-canvas');
   var shadowCtx = null;
   var lastRawShadowData = { type: 'FeatureCollection', features: [] };
-  var lastBuildingData  = { type: 'FeatureCollection', features: [] };
   var cafeFeatures = [];
   var cafeMarkers = [];
   var lastCafeSunById = {};
@@ -554,7 +553,7 @@ export const MAP_HTML = `<!DOCTYPE html>
     shadowCanvas.style.opacity = shadowsEnabled ? String(SHADOW_OPACITY) : '0';
   }
 
-  function drawShadowCanvas(shadowGeoJSON, buildingData) {
+  function drawShadowCanvas(shadowGeoJSON) {
     if (!shadowCtx || !shadowCanvas) return;
     var w = shadowCanvas.width / (window.devicePixelRatio || 1);
     var h = shadowCanvas.height / (window.devicePixelRatio || 1);
@@ -588,30 +587,6 @@ export const MAP_HTML = `<!DOCTYPE html>
     }
     // nonzero fill: overlapping subpaths are filled once — no alpha stacking.
     shadowCtx.fill('nonzero');
-
-    // Erase shadow where building footprints stand so buildings appear above shadows.
-    // Uses lastBuildingData (same snapshot as the shadow computation) to stay in sync.
-    if (buildingData && buildingData.features.length) {
-      shadowCtx.globalCompositeOperation = 'destination-out';
-      shadowCtx.beginPath();
-      for (var bi = 0; bi < buildingData.features.length; bi++) {
-        var bGeom = buildingData.features[bi].geometry;
-        var bPolys = bGeom.type === 'Polygon' ? [bGeom.coordinates] : bGeom.coordinates;
-        for (var bpi = 0; bpi < bPolys.length; bpi++) {
-          var bRing = bPolys[bpi][0];
-          if (!bRing || !bRing.length) continue;
-          var bp0 = map.project([bRing[0][0], bRing[0][1]]);
-          shadowCtx.moveTo(bp0.x, bp0.y);
-          for (var bci = 1; bci < bRing.length; bci++) {
-            var bp = map.project([bRing[bci][0], bRing[bci][1]]);
-            shadowCtx.lineTo(bp.x, bp.y);
-          }
-          shadowCtx.closePath();
-        }
-      }
-      shadowCtx.fill('nonzero');
-      shadowCtx.globalCompositeOperation = 'source-over';
-    }
   }
 
   function computeShadowGeoJSON(buildings, sun, refLatDeg, options) {
@@ -696,8 +671,7 @@ export const MAP_HTML = `<!DOCTYPE html>
       var rawShadowData = computeShadowGeoJSON(buildings, sun, center.lat);
       emitCafeSunStatus(rawShadowData, sun.altitude);
       lastRawShadowData = rawShadowData;
-      lastBuildingData  = buildings;
-      drawShadowCanvas(rawShadowData, buildings);
+      drawShadowCanvas(rawShadowData);
       if (nightOverlay) {
         var isNight = sun.altitude < MIN_SUN_ALT_RAD;
         nightOverlay.style.opacity =
@@ -836,7 +810,7 @@ export const MAP_HTML = `<!DOCTYPE html>
 
   // Redraw canvas every frame during pan/zoom/rotate (just re-projects existing geo coords — fast).
   map.on('move', function () {
-    drawShadowCanvas(lastRawShadowData, lastBuildingData);
+    drawShadowCanvas(lastRawShadowData);
   });
 
   map.on('moveend', function () {
@@ -872,7 +846,7 @@ export const MAP_HTML = `<!DOCTYPE html>
         case 'SET_SHADOWS':
           shadowsEnabled = msg.enabled;
           if (shadowCanvas) shadowCanvas.style.opacity = shadowsEnabled ? String(SHADOW_OPACITY) : '0';
-          drawShadowCanvas(lastRawShadowData, lastBuildingData);
+          drawShadowCanvas(lastRawShadowData);
           scheduleShadowUpdate(0);
           break;
 
