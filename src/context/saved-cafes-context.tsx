@@ -12,6 +12,20 @@ interface SavedCafesContextValue {
 
 const SavedCafesContext = createContext<SavedCafesContextValue | null>(null);
 
+function confirmRemoveFavorite(): Promise<boolean> {
+  return new Promise((resolve) => {
+    Alert.alert(
+      'Remove favorite?',
+      'Do you really want to remove this cafe from your favorites?',
+      [
+        { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+        { text: 'Remove', style: 'destructive', onPress: () => resolve(true) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(false) },
+    );
+  });
+}
+
 export function SavedCafesProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
@@ -44,6 +58,10 @@ export function SavedCafesProvider({ children }: { children: React.ReactNode }) 
     }
 
     const alreadySaved = savedIds.has(cafeId);
+    if (alreadySaved) {
+      const confirmed = await confirmRemoveFavorite();
+      if (!confirmed) return;
+    }
 
     // Optimistic update
     setSavedIds(prev => {

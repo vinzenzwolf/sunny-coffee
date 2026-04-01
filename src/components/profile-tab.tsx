@@ -2,6 +2,7 @@ import * as Location from 'expo-location';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Platform,
   ScrollView,
   StyleSheet,
@@ -49,6 +50,24 @@ function ProfileLoggedIn({ topInset, bottomInset }: Props) {
     } finally {
       setUpdatingLocationSetting(false);
     }
+  };
+
+  const handleSignOutPress = () => {
+    Alert.alert(
+      'Sign out?',
+      'Do you really want to sign out?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sign out',
+          style: 'destructive',
+          onPress: () => {
+            void signOut();
+          },
+        },
+      ],
+      { cancelable: true },
+    );
   };
 
   return (
@@ -112,7 +131,7 @@ function ProfileLoggedIn({ topInset, bottomInset }: Props) {
         {/* Account section */}
         <Text style={styles.sectionLabel}>Account</Text>
         <View style={styles.group}>
-          <TouchableOpacity style={styles.row} onPress={signOut} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.row} onPress={handleSignOutPress} activeOpacity={0.7}>
             <View style={[styles.rowIcon, { backgroundColor: '#FFF0EE' }]}>
               <Ionicons name="log-out-outline" size={18} color="#C0392B" />
             </View>
