@@ -454,7 +454,7 @@ export const MAP_HTML = `<!DOCTYPE html>
           name: c.name || 'Cafe',
           inSunNow: c.metadata && typeof c.metadata.inSunNow === 'boolean'
             ? c.metadata.inSunNow
-            : true,
+            : false,
           distanceMeters: c.metadata && typeof c.metadata.distanceMeters === 'number' ? c.metadata.distanceMeters : null,
           distanceKm: c.metadata && typeof c.metadata.distanceKm === 'number' ? c.metadata.distanceKm : null,
           lat: c.lat,

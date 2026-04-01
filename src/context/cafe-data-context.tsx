@@ -54,8 +54,7 @@ export function CafeDataProvider({ children }: { children: React.ReactNode }) {
     setCafes((prev) => {
       const updatedAt = Date.now();
       const next = prev.map((cafe) => {
-        const inSun = statusById.get(cafe.id);
-        if (typeof inSun !== 'boolean') return cafe;
+        const inSun = statusById.get(cafe.id) ?? false;
         return {
           ...cafe,
           metadata: {
