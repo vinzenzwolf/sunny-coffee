@@ -130,8 +130,8 @@ export const MAP_HTML = `<!DOCTYPE html>
   var SHADOW_QUERY_PAD_FACTOR = 1.75; // 1.0 = viewport only, 1.75 = include surroundings
   // Uniform semitransparent shadows require dissolved geometry
   // (otherwise overlap regions get darker due to alpha stacking).
-  var SHADOW_OPACITY  = 0.42;
-  var SHADOW_COLOR    = '#4f5f7d';
+  var SHADOW_OPACITY  = 0.65;
+  var SHADOW_COLOR    = '#333333';
   var NIGHT_OVERLAY_OPACITY = 0.55;
   var MAX_SHADOW_RING_POINTS = 28;
   var SCRUB_UPDATE_INTERVAL_MS = 70;
@@ -558,7 +558,7 @@ export const MAP_HTML = `<!DOCTYPE html>
 
     // Shadow polygon shader: projects Mercator coords via MapLibre's matrix.
     var SHADOW_VS = 'attribute vec2 a_pos;uniform mat4 u_matrix;void main(){gl_Position=u_matrix*vec4(a_pos,0.0,1.0);}';
-    var SHADOW_FS = 'void main(){gl_FragColor=vec4(0.310,0.373,0.490,1.0);}'; // #4f5f7d
+    var SHADOW_FS = 'void main(){gl_FragColor=vec4(0.200,0.200,0.200,1.0);}'; // #333333
 
     // Full-screen quad shader: composites the FBO texture with desired opacity.
     var QUAD_VS = 'attribute vec2 a_pos;varying vec2 v_t;void main(){v_t=a_pos*0.5+0.5;gl_Position=vec4(a_pos,0.0,1.0);}';
