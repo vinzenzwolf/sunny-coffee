@@ -100,6 +100,7 @@ export interface ToastMessage {
 
 export interface CafeMetadata {
   openingHours?: string;
+  sunWindows?: { start: string; end: string }[];
   distanceMeters?: number;
   distanceKm?: number;
   distanceUpdatedAt?: number;

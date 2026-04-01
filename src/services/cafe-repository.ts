@@ -10,7 +10,13 @@ type SupabaseCafeRow = {
   name: string;
   lat: number;
   lng: number;
+  opening_hours: string | null;
   google_formatted_address: string | null;
+};
+
+type SupabaseSunWindowRow = {
+  cafe_id: string;
+  intervals: unknown;
 };
 
 type GeoPoint = {
@@ -24,22 +30,73 @@ type CafeCachePayload = {
   cafes: Cafe[];
 };
 
-function rowToCafe(row: SupabaseCafeRow): Cafe {
+function copenhagenTodayDateString(now = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Copenhagen',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+
+  const year = parts.find((p) => p.type === 'year')?.value ?? '1970';
+  const month = parts.find((p) => p.type === 'month')?.value ?? '01';
+  const day = parts.find((p) => p.type === 'day')?.value ?? '01';
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeIntervals(input: unknown): { start: string; end: string }[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .filter((item): item is { start: string; end: string } => (
+      typeof item === 'object' &&
+      item !== null &&
+      typeof (item as { start?: unknown }).start === 'string' &&
+      typeof (item as { end?: unknown }).end === 'string'
+    ))
+    .map((item) => ({ start: item.start, end: item.end }));
+}
+
+function rowToCafe(
+  row: SupabaseCafeRow,
+  sunWindowsByCafeId: Map<string, { start: string; end: string }[]>,
+): Cafe {
+  const sunWindows = sunWindowsByCafeId.get(row.id) ?? [];
   return {
     id: row.id,
     name: row.name || 'Cafe',
     lat: row.lat,
     lng: row.lng,
     googleFormattedAddress: row.google_formatted_address,
+    metadata: {
+      openingHours: row.opening_hours ?? undefined,
+      sunWindows,
+    },
   };
 }
 
 export async function fetchCafesFromSupabase(): Promise<Cafe[]> {
-  const { data, error } = await supabase
-    .from('cafes')
-    .select('id, name, lat, lng, google_formatted_address');
-  if (error) throw new Error(error.message);
-  return (data as SupabaseCafeRow[]).map(rowToCafe);
+  const today = copenhagenTodayDateString();
+  const [cafesRes, sunRes] = await Promise.all([
+    supabase
+      .from('cafes')
+      .select('id, name, lat, lng, opening_hours, google_formatted_address'),
+    supabase
+      .from('sun_windows')
+      .select('cafe_id, intervals')
+      .eq('date', today),
+  ]);
+
+  if (cafesRes.error) throw new Error(cafesRes.error.message);
+  if (sunRes.error) throw new Error(sunRes.error.message);
+
+  const sunWindowsByCafeId = new Map<string, { start: string; end: string }[]>();
+  for (const row of (sunRes.data ?? []) as SupabaseSunWindowRow[]) {
+    sunWindowsByCafeId.set(row.cafe_id, normalizeIntervals(row.intervals));
+  }
+
+  return ((cafesRes.data ?? []) as SupabaseCafeRow[]).map((row) =>
+    rowToCafe(row, sunWindowsByCafeId),
+  );
 }
 
 export async function saveCachedCafes(cafes: Cafe[]): Promise<void> {
