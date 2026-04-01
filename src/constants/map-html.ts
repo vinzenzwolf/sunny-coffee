@@ -136,9 +136,7 @@ export const MAP_HTML = `<!DOCTYPE html>
   var SHADOW_SOURCE_ID = 'client-shadows';
   var SHADOW_LAYER_ID  = 'client-shadows-fill';
   var NIGHT_OVERLAY_OPACITY = 0.55;
-  var MAX_DISSOLVE_FEATURES = 2000;
-  var DISSOLVE_MIN_ZOOM = 16.2;
-  var SHADOW_OPACITY_FAST = 0.30;
+  var MAX_DISSOLVE_FEATURES = 400;
   var MAX_SHADOW_RING_POINTS = 28;
   var MAX_SHADOW_RING_POINTS_SCRUB = 12;
   var SCRUB_UPDATE_INTERVAL_MS = 70;
@@ -606,7 +604,7 @@ export const MAP_HTML = `<!DOCTYPE html>
   function dissolveShadows(shadowFC) {
     if (!shadowFC.features.length) return shadowFC;
     if (shadowFC.features.length > MAX_DISSOLVE_FEATURES) {
-      return shadowFC;
+      shadowFC = { type: 'FeatureCollection', features: shadowFC.features.slice(0, MAX_DISSOLVE_FEATURES) };
     }
     if (!window.polygonClipping || typeof window.polygonClipping.union !== 'function') {
       return shadowFC;
@@ -712,7 +710,7 @@ export const MAP_HTML = `<!DOCTYPE html>
           : undefined,
       );
       emitCafeSunStatus(rawShadowData, sun.altitude);
-      var shadowData = isScrubbing ? rawShadowData : dissolveShadows(rawShadowData);
+      var shadowData = dissolveShadows(rawShadowData);
       var src = map.getSource(SHADOW_SOURCE_ID);
       if (src) src.setData(shadowData);
       if (nightOverlay) {
@@ -724,7 +722,7 @@ export const MAP_HTML = `<!DOCTYPE html>
         map.setPaintProperty(
           SHADOW_LAYER_ID,
           'fill-opacity',
-          shadowsEnabled ? (isScrubbing ? SHADOW_OPACITY_FAST : SHADOW_OPACITY) : 0
+          shadowsEnabled ? SHADOW_OPACITY : 0
         );
       }
 
