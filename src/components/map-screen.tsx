@@ -193,8 +193,8 @@ function VenueCard({
   const rawMinutes = isFinite(date.getTime())
     ? date.getHours() * 60 + date.getMinutes()
     : sunriseMinutes;
-  const displayedMinutes =
-    scrubMinutes ?? Math.min(Math.max(rawMinutes, sunriseMinutes), sunsetMinutes);
+  const labelMinutes = scrubMinutes ?? rawMinutes;
+  const displayedMinutes = Math.min(Math.max(labelMinutes, sunriseMinutes), sunsetMinutes);
   const dayFraction = range > 0 ? (displayedMinutes - sunriseMinutes) / range : 0;
   const tooltipLeft = (() => {
     if (!sliderWidth) return `${dayFraction * 100}%` as `${number}%`;
@@ -203,8 +203,8 @@ function VenueCard({
     return clamped;
   })();
   const timeLabel = (() => {
-    const h = Math.floor(displayedMinutes / 60);
-    const m = displayedMinutes % 60;
+    const h = Math.floor(labelMinutes / 60);
+    const m = labelMinutes % 60;
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   })();
 

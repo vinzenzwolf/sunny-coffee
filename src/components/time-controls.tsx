@@ -84,10 +84,11 @@ export function TimeControls({
   );
 
   const rawMinutes = isFinite(date.getTime()) ? date.getHours() * 60 + date.getMinutes() : sunriseMinutes;
-  const displayedMinutes = scrubMinutes ?? Math.min(Math.max(rawMinutes, sunriseMinutes), sunsetMinutes);
+  const labelMinutes = scrubMinutes ?? rawMinutes;
+  const displayedMinutes = Math.min(Math.max(labelMinutes, sunriseMinutes), sunsetMinutes);
   const range = sunsetMinutes - sunriseMinutes;
   const dayFraction = range > 0 ? (displayedMinutes - sunriseMinutes) / range : 0;
-  const displayedHour = Math.floor(displayedMinutes / 60);
+  const displayedHour = Math.floor(labelMinutes / 60);
   const tooltipLeft = (() => {
     if (!sliderWidth) return `${dayFraction * 100}%` as `${number}%`;
     const x = dayFraction * sliderWidth;
@@ -150,7 +151,7 @@ export function TimeControls({
         <View style={styles.track} pointerEvents="none">
           <View style={[styles.fill, { width: `${dayFraction * 100}%` as `${number}%` }]} />
           <View style={[styles.thumbTooltip, { left: tooltipLeft }]}>
-            <Text style={styles.thumbTooltipText}>{minutesToTimeString(displayedMinutes)}</Text>
+            <Text style={styles.thumbTooltipText}>{minutesToTimeString(labelMinutes)}</Text>
           </View>
           <View
             style={[
