@@ -141,7 +141,22 @@ export function enrichCafesWithDistance(
   currentLocation: GeoPoint | null,
   updatedAt = Date.now(),
 ): Cafe[] {
-  if (!currentLocation) return cafes;
+  if (!currentLocation) {
+    return cafes.map((cafe) => {
+      if (!cafe.metadata) return cafe;
+      const {
+        distanceMeters: _distanceMeters,
+        distanceKm: _distanceKm,
+        distanceUpdatedAt: _distanceUpdatedAt,
+        distanceFrom: _distanceFrom,
+        ...metadataWithoutDistance
+      } = cafe.metadata;
+      return {
+        ...cafe,
+        metadata: metadataWithoutDistance,
+      };
+    });
+  }
 
   return cafes.map((cafe) => {
     const distanceMeters = haversineDistanceMeters(currentLocation, {

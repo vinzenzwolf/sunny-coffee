@@ -45,6 +45,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { MAP_HTML } from '../constants/map-html';
 import { useCafeData } from '../context/cafe-data-context';
+import { useLocationSettings } from '../context/location-settings-context';
 import { useSavedCafes } from '../context/saved-cafes-context';
 import { getDaylight } from '../services/sun-position';
 import { throttle } from '../utils/debounce';
@@ -524,6 +525,7 @@ function SearchBar({
   onQueryChange,
   onSelectCafe,
   onLocateMe,
+  canLocate,
 }: {
   top: number;
   query: string;
@@ -531,6 +533,7 @@ function SearchBar({
   onQueryChange: (value: string) => void;
   onSelectCafe: (cafe: Cafe) => void;
   onLocateMe?: () => void;
+  canLocate?: boolean;
 }) {
   const hasQuery = query.trim().length > 0;
   const showResults = hasQuery && results.length > 0;
@@ -563,7 +566,12 @@ function SearchBar({
             </TouchableOpacity>
           )}
         </View>
-        <TouchableOpacity style={styles.locBtn} activeOpacity={0.8} onPress={onLocateMe}>
+        <TouchableOpacity
+          style={[styles.locBtn, !canLocate && styles.locBtnDisabled]}
+          activeOpacity={0.8}
+          onPress={onLocateMe}
+          disabled={!canLocate}
+        >
           <Ionicons name="navigate" size={18} color="#1C1B19" />
         </TouchableOpacity>
       </View>
@@ -637,6 +645,7 @@ export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const webviewRef = useRef<WebView>(null);
   const { cafes, updateSunStatus } = useCafeData();
+  const { useMyLocation, loading: locationSettingsLoading } = useLocationSettings();
 
   const [mapReady, setMapReady] = useState(false);
   const [date, setDate] = useState(() => new Date());
@@ -717,7 +726,7 @@ export default function MapScreen() {
 
   // On startup, focus camera on current user location; fallback to city center if unavailable.
   useEffect(() => {
-    if (!mapReady) return;
+    if (!mapReady || locationSettingsLoading) return;
     let sub: Location.LocationSubscription | null = null;
     let cancelled = false;
     (async () => {
@@ -739,6 +748,15 @@ export default function MapScreen() {
         );
         hasInitialCameraFocusRef.current = true;
       };
+
+      if (!useMyLocation) {
+        setUserLocation(null);
+        webviewRef.current?.injectJavaScript(buildPostMessage({ type: 'CLEAR_LOCATION' }));
+        if (!hasInitialCameraFocusRef.current) {
+          focusCenter(DEFAULT_LAT, DEFAULT_LNG);
+        }
+        return;
+      }
 
       let { status } = await Location.getForegroundPermissionsAsync();
       if (status !== 'granted') {
@@ -795,7 +813,7 @@ export default function MapScreen() {
       cancelled = true;
       sub?.remove();
     };
-  }, [mapReady, DEFAULT_LAT, DEFAULT_LNG]);
+  }, [mapReady, locationSettingsLoading, useMyLocation, DEFAULT_LAT, DEFAULT_LNG]);
 
   // ─── WebView → RN ─────────────────────────────────────────────────────
 
@@ -959,6 +977,7 @@ export default function MapScreen() {
           onQueryChange={setSearchQuery}
           onSelectCafe={handleSelectCafe}
           onLocateMe={handleLocateMe}
+          canLocate={useMyLocation && !!userLocation}
         />
       )}
 
@@ -1115,6 +1134,9 @@ const styles = StyleSheet.create({
       },
       android: { elevation: 3 },
     }),
+  },
+  locBtnDisabled: {
+    opacity: 0.45,
   },
   searchResults: {
     marginTop: 8,

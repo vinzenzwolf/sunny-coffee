@@ -2,6 +2,7 @@ import * as Location from 'expo-location';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 import type { Cafe } from '../types';
+import { useLocationSettings } from './location-settings-context';
 import {
   enrichCafesWithDistance,
   fetchCafesFromSupabase,
@@ -41,6 +42,7 @@ async function getCurrentLocation(): Promise<{ lat: number; lng: number } | null
 }
 
 export function CafeDataProvider({ children }: { children: React.ReactNode }) {
+  const { useMyLocation, loading: locationSettingsLoading } = useLocationSettings();
   const [cafes, setCafes] = useState<Cafe[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -69,10 +71,16 @@ export function CafeDataProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (locationSettingsLoading || useMyLocation) return;
+    setCafes((prev) => enrichCafesWithDistance(prev, null));
+  }, [locationSettingsLoading, useMyLocation]);
+
+  useEffect(() => {
+    if (locationSettingsLoading) return;
     let cancelled = false;
     (async () => {
       try {
-        const currentLocation = await getCurrentLocation();
+        const currentLocation = useMyLocation ? await getCurrentLocation() : null;
 
         // Show cached data immediately while fetching fresh data
         const cached = await loadCachedCafes();
@@ -99,7 +107,7 @@ export function CafeDataProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [locationSettingsLoading, useMyLocation]);
 
   const value = useMemo(
     () => ({ cafes, loading, error, updateSunStatus }),

@@ -3,13 +3,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
-import { View } from 'react-native';
+import { useColorScheme, View } from 'react-native';
 import 'react-native-reanimated';
-
-import { useColorScheme } from 'react-native';
 import { Onboarding } from '@/src/components/onboarding';
 import { AuthProvider } from '@/src/context/auth-context';
 import { CafeDataProvider } from '@/src/context/cafe-data-context';
+import { LocationSettingsProvider } from '@/src/context/location-settings-context';
 import { SavedCafesProvider } from '@/src/context/saved-cafes-context';
 
 const ONBOARDING_KEY = 'onboarding_complete';
@@ -41,22 +40,24 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
-    <SavedCafesProvider>
-    <CafeDataProvider>
-      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <Stack>
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        </Stack>
-        <StatusBar style="dark" />
+      <SavedCafesProvider>
+        <LocationSettingsProvider>
+          <CafeDataProvider>
+            <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+              <Stack>
+                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              </Stack>
+              <StatusBar style="dark" />
 
-        {!onboardingDone && (
-          <View style={{ position: 'absolute', inset: 0 } as any}>
-            <Onboarding onComplete={handleOnboardingComplete} />
-          </View>
-        )}
-      </ThemeProvider>
-    </CafeDataProvider>
-    </SavedCafesProvider>
+              {!onboardingDone && (
+                <View style={{ position: 'absolute', inset: 0 } as any}>
+                  <Onboarding onComplete={handleOnboardingComplete} />
+                </View>
+              )}
+            </ThemeProvider>
+          </CafeDataProvider>
+        </LocationSettingsProvider>
+      </SavedCafesProvider>
     </AuthProvider>
   );
 }

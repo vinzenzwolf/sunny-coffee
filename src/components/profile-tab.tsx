@@ -1,3 +1,4 @@
+import * as Location from 'expo-location';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
@@ -11,6 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/auth-context';
+import { useLocationSettings } from '../context/location-settings-context';
 
 type Props = {
   topInset: number;
@@ -23,10 +25,31 @@ type Props = {
 
 function ProfileLoggedIn({ topInset, bottomInset }: Props) {
   const { user, signOut } = useAuth();
-  const [useLocation, setUseLocation] = useState(true);
+  const { useMyLocation, setUseMyLocation } = useLocationSettings();
+  const [updatingLocationSetting, setUpdatingLocationSetting] = useState(false);
 
   const displayName = user?.user_metadata?.full_name ?? user?.email?.split('@')[0] ?? 'User';
   const avatarLetter = displayName.charAt(0).toUpperCase();
+  const handleUseMyLocationChange = async (enabled: boolean) => {
+    if (updatingLocationSetting) return;
+    setUpdatingLocationSetting(true);
+    try {
+      if (enabled) {
+        let { status } = await Location.getForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          const req = await Location.requestForegroundPermissionsAsync();
+          status = req.status;
+        }
+        if (status !== 'granted') {
+          await setUseMyLocation(false);
+          return;
+        }
+      }
+      await setUseMyLocation(enabled);
+    } finally {
+      setUpdatingLocationSetting(false);
+    }
+  };
 
   return (
     <View style={[styles.container, { paddingTop: topInset }]}>
@@ -76,8 +99,9 @@ function ProfileLoggedIn({ topInset, bottomInset }: Props) {
               <Text style={styles.rowSub}>Auto-detect when app opens</Text>
             </View>
             <Switch
-              value={useLocation}
-              onValueChange={setUseLocation}
+              value={useMyLocation}
+              onValueChange={handleUseMyLocationChange}
+              disabled={updatingLocationSetting}
               trackColor={{ false: '#E0DDD9', true: '#1C1B19' }}
               thumbColor="#fff"
               ios_backgroundColor="#E0DDD9"

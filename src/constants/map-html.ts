@@ -976,6 +976,17 @@ export const MAP_HTML = `<!DOCTYPE html>
           break;
         }
 
+        case 'CLEAR_LOCATION': {
+          var userLocSrc = map.getSource('user-location');
+          if (userLocSrc) {
+            userLocSrc.setData({
+              type: 'FeatureCollection',
+              features: []
+            });
+          }
+          break;
+        }
+
         case 'FLY_TO':
           if (typeof msg.lat === 'number' && typeof msg.lng === 'number') {
             map.flyTo({ center: [msg.lng, msg.lat], zoom: 15, duration: 1200 });
