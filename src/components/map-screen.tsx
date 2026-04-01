@@ -29,6 +29,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   GestureResponderEvent,
   LayoutChangeEvent,
+  Linking,
   TextInput,
   Platform,
   StatusBar,
@@ -109,6 +110,18 @@ function HeartButton({ cafeId }: { cafeId: string }) {
       activeOpacity={0.8}
     >
       <Ionicons name={saved ? 'heart' : 'heart-outline'} size={17} color="#fff" />
+    </TouchableOpacity>
+  );
+}
+
+function DirectionsButton({ lat, lng }: { lat: number; lng: number }) {
+  const handlePress = () => {
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=walking`;
+    Linking.openURL(url);
+  };
+  return (
+    <TouchableOpacity style={vcStyles.arrow} onPress={handlePress} activeOpacity={0.8}>
+      <Ionicons name="navigate-outline" size={17} color="#fff" />
     </TouchableOpacity>
   );
 }
@@ -210,7 +223,10 @@ function VenueCard({
             </View>
           )}
         </View>
-        <HeartButton cafeId={cafe.id} />
+        <View style={vcStyles.buttonRow}>
+          <DirectionsButton lat={cafe.lat} lng={cafe.lng} />
+          <HeartButton cafeId={cafe.id} />
+        </View>
       </View>
 
       {/* Inset slider */}
@@ -348,6 +364,11 @@ const vcStyles = StyleSheet.create({
   },
   arrowSaved: {
     backgroundColor: '#E8391A',
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
   },
   sliderInset: {
     backgroundColor: '#F8F6F3',
