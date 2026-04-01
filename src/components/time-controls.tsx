@@ -52,20 +52,21 @@ export function TimeControls({
   onScrubStart,
   onScrubEnd,
 }: TimeControlsProps) {
-  const sliderWidth = useRef(0);
+  const [sliderWidth, setSliderWidth] = useState(0);
   const lastSliderMinutes = useRef<number | null>(null);
   const scrubMinutesRef = useRef<number | null>(null);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [scrubMinutes, setScrubMinutes] = useState<number | null>(null);
 
   const handleSliderLayout = useCallback((e: LayoutChangeEvent) => {
-    sliderWidth.current = e.nativeEvent.layout.width;
-  }, []);
+    const width = e.nativeEvent.layout.width;
+    if (width !== sliderWidth) setSliderWidth(width);
+  }, [sliderWidth]);
 
   const handleSliderTouch = useCallback(
     (e: GestureResponderEvent) => {
-      if (sliderWidth.current === 0) return;
-      const fraction = e.nativeEvent.locationX / sliderWidth.current;
+      if (sliderWidth === 0) return;
+      const fraction = e.nativeEvent.locationX / sliderWidth;
       if (!isFinite(fraction)) return;
       const minutes = sliderXToMinutes(fraction, sunriseMinutes, sunsetMinutes);
       if (!isFinite(minutes)) return;
@@ -79,7 +80,7 @@ export function TimeControls({
       if (!isFinite(next.getTime())) return;
       onDateChange(next);
     },
-    [date, sunriseMinutes, sunsetMinutes, onDateChange],
+    [date, sunriseMinutes, sunsetMinutes, onDateChange, sliderWidth],
   );
 
   const rawMinutes = isFinite(date.getTime()) ? date.getHours() * 60 + date.getMinutes() : sunriseMinutes;
@@ -88,9 +89,9 @@ export function TimeControls({
   const dayFraction = range > 0 ? (displayedMinutes - sunriseMinutes) / range : 0;
   const displayedHour = Math.floor(displayedMinutes / 60);
   const tooltipLeft = (() => {
-    if (!sliderWidth.current) return `${dayFraction * 100}%` as `${number}%`;
-    const x = dayFraction * sliderWidth.current;
-    const clamped = Math.max(0, Math.min(sliderWidth.current - TOOLTIP_WIDTH, x - TOOLTIP_WIDTH / 2));
+    if (!sliderWidth) return `${dayFraction * 100}%` as `${number}%`;
+    const x = dayFraction * sliderWidth;
+    const clamped = Math.max(0, Math.min(sliderWidth - TOOLTIP_WIDTH, x - TOOLTIP_WIDTH / 2));
     return clamped;
   })();
 

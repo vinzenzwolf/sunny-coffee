@@ -101,6 +101,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'profile', label: 'Profile', icon: 'person-outline',   iconActive: 'person' },
 ];
 const TOOLTIP_WIDTH = 52;
+const VC_SLIDER_TOUCH_INSET_X = 8;
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -182,7 +183,7 @@ function VenueCard({
   onScrubStart?: () => void;
   onScrubEnd?: () => void;
 }) {
-  const sliderWidth = useRef(0);
+  const [sliderWidth, setSliderWidth] = useState(0);
   const scrubMinutesRef = useRef<number | null>(null);
   const lastSliderMinutes = useRef<number | null>(null);
   const [isScrubbing, setIsScrubbing] = useState(false);
@@ -196,9 +197,9 @@ function VenueCard({
     scrubMinutes ?? Math.min(Math.max(rawMinutes, sunriseMinutes), sunsetMinutes);
   const dayFraction = range > 0 ? (displayedMinutes - sunriseMinutes) / range : 0;
   const tooltipLeft = (() => {
-    if (!sliderWidth.current) return `${dayFraction * 100}%` as `${number}%`;
-    const x = dayFraction * sliderWidth.current;
-    const clamped = Math.max(0, Math.min(sliderWidth.current - TOOLTIP_WIDTH, x - TOOLTIP_WIDTH / 2));
+    if (!sliderWidth) return `${dayFraction * 100}%` as `${number}%`;
+    const x = dayFraction * sliderWidth;
+    const clamped = Math.max(0, Math.min(sliderWidth - TOOLTIP_WIDTH, x - TOOLTIP_WIDTH / 2));
     return clamped;
   })();
   const timeLabel = (() => {
@@ -208,13 +209,15 @@ function VenueCard({
   })();
 
   const handleLayout = useCallback((e: LayoutChangeEvent) => {
-    sliderWidth.current = e.nativeEvent.layout.width;
-  }, []);
+    const width = e.nativeEvent.layout.width;
+    if (width !== sliderWidth) setSliderWidth(width);
+  }, [sliderWidth]);
 
   const handleTouch = useCallback(
     (e: GestureResponderEvent) => {
-      if (sliderWidth.current === 0) return;
-      const fraction = e.nativeEvent.locationX / sliderWidth.current;
+      if (sliderWidth === 0) return;
+      const x = e.nativeEvent.locationX - VC_SLIDER_TOUCH_INSET_X;
+      const fraction = x / sliderWidth;
       if (!isFinite(fraction)) return;
       const clamped = Math.min(Math.max(fraction, 0), 1);
       const minutes = Math.round(sunriseMinutes + clamped * range);
@@ -228,7 +231,7 @@ function VenueCard({
       if (!isFinite(next.getTime())) return;
       onDateChange(next);
     },
-    [date, sunriseMinutes, range, onDateChange],
+    [date, sunriseMinutes, range, onDateChange, sliderWidth],
   );
 
   const distanceText = (() => {
@@ -276,7 +279,6 @@ function VenueCard({
         </View>
         <View
           style={vcStyles.sliderArea}
-          onLayout={handleLayout}
           onStartShouldSetResponder={() => true}
           onMoveShouldSetResponder={() => true}
           onResponderTerminationRequest={() => false}
@@ -307,7 +309,7 @@ function VenueCard({
             onScrubEnd?.();
           }}
         >
-          <View style={vcStyles.track} pointerEvents="none">
+          <View style={vcStyles.track} pointerEvents="none" onLayout={handleLayout}>
             <View style={[vcStyles.fill, { width: `${dayFraction * 100}%` as `${number}%` }]} />
             <View style={[vcStyles.thumbTooltip, { left: tooltipLeft }]}>
               <Text style={vcStyles.thumbTooltipText}>{timeLabel}</Text>
@@ -461,7 +463,13 @@ const vcStyles = StyleSheet.create({
   nowBtnTextHidden: {
     color: 'transparent',
   },
-  sliderArea: { marginTop: 18, paddingBottom: 2 },
+  sliderArea: {
+    marginTop: 8,
+    marginHorizontal: -8,
+    paddingHorizontal: 8,
+    paddingTop: 14,
+    paddingBottom: 14,
+  },
   track: {
     height: 4,
     backgroundColor: '#EAE7E3',
