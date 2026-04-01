@@ -35,6 +35,11 @@ export const MAP_HTML = `<!DOCTYPE html>
     html, body, #map { width:100%; height:100%; overflow:hidden; }
     .maplibregl-ctrl-bottom-left,
     .maplibregl-ctrl-bottom-right { display:none; }
+    #shadow-canvas {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
     #night-overlay {
       position: absolute;
       inset: 0;
@@ -113,11 +118,11 @@ export const MAP_HTML = `<!DOCTYPE html>
 </head>
 <body>
   <div id="map"></div>
+  <canvas id="shadow-canvas"></canvas>
   <div id="night-overlay"></div>
 
   <script src="https://unpkg.com/maplibre-gl@${MAPLIBRE_VER}/dist/maplibre-gl.js"></script>
   <script src="https://unpkg.com/suncalc@${SUNCALC_VER}/suncalc.js"></script>
-  <script src="https://unpkg.com/polygon-clipping@0.15.7/dist/polygon-clipping.umd.min.js"></script>
 
 <script>
 (function () {
@@ -133,14 +138,8 @@ export const MAP_HTML = `<!DOCTYPE html>
   // (otherwise overlap regions get darker due to alpha stacking).
   var SHADOW_OPACITY  = 0.42;
   var SHADOW_COLOR    = '#4f5f7d';
-  var SHADOW_SOURCE_ID = 'client-shadows';
-  var SHADOW_LAYER_ID  = 'client-shadows-fill';
   var NIGHT_OVERLAY_OPACITY = 0.55;
-  var MAX_DISSOLVE_FEATURES = 2000;
-  var DISSOLVE_MIN_ZOOM = 16.2;
-  var SHADOW_OPACITY_FAST = 0.30;
   var MAX_SHADOW_RING_POINTS = 28;
-  var MAX_SHADOW_RING_POINTS_SCRUB = 12;
   var SCRUB_UPDATE_INTERVAL_MS = 70;
   var CAFE_SOURCE_ID = 'osm-cafes';
   var MAX_VISIBLE_CAFE_MARKERS = 140;
@@ -159,6 +158,9 @@ export const MAP_HTML = `<!DOCTYPE html>
   var isScrubbing = false;
   var selectedCafeId = null;
   var nightOverlay = document.getElementById('night-overlay');
+  var shadowCanvas = document.getElementById('shadow-canvas');
+  var shadowCtx = null;
+  var lastRawShadowData = { type: 'FeatureCollection', features: [] };
   var cafeFeatures = [];
   var cafeMarkers = [];
   var lastCafeSunById = {};
@@ -531,25 +533,53 @@ export const MAP_HTML = `<!DOCTYPE html>
     postToRN({ type: 'CAFE_SUN_STATUS', statuses: statuses });
   }
 
-  function ensureShadowLayer() {
-    if (!map.getSource(SHADOW_SOURCE_ID)) {
-      map.addSource(SHADOW_SOURCE_ID, {
-        type: 'geojson',
-        data: emptyShadowCollection(),
-      });
+  function initShadowCanvas() {
+    if (!shadowCanvas) return;
+    var container = map.getContainer();
+    var dpr = window.devicePixelRatio || 1;
+    shadowCanvas.width  = container.clientWidth  * dpr;
+    shadowCanvas.height = container.clientHeight * dpr;
+    shadowCanvas.style.width  = container.clientWidth  + 'px';
+    shadowCanvas.style.height = container.clientHeight + 'px';
+    shadowCtx = shadowCanvas.getContext('2d');
+    if (shadowCtx) shadowCtx.scale(dpr, dpr);
+    shadowCanvas.style.opacity = shadowsEnabled ? String(SHADOW_OPACITY) : '0';
+  }
+
+  function drawShadowCanvas(shadowGeoJSON) {
+    if (!shadowCtx || !shadowCanvas) return;
+    var w = shadowCanvas.width / (window.devicePixelRatio || 1);
+    var h = shadowCanvas.height / (window.devicePixelRatio || 1);
+    shadowCtx.clearRect(0, 0, w, h);
+    if (!shadowsEnabled || !shadowGeoJSON || !shadowGeoJSON.features.length) return;
+
+    shadowCtx.fillStyle = SHADOW_COLOR;
+    shadowCtx.beginPath();
+
+    var features = shadowGeoJSON.features;
+    for (var fi = 0; fi < features.length; fi++) {
+      var geom = features[fi].geometry;
+      // polysCoords: array of polygons, each polygon is array of rings
+      var polysCoords = geom.type === 'Polygon'
+        ? [geom.coordinates]
+        : geom.coordinates; // MultiPolygon
+      for (var pi = 0; pi < polysCoords.length; pi++) {
+        var rings = polysCoords[pi];
+        for (var ri = 0; ri < rings.length; ri++) {
+          var ring = rings[ri];
+          if (!ring.length) continue;
+          var p0 = map.project([ring[0][0], ring[0][1]]);
+          shadowCtx.moveTo(p0.x, p0.y);
+          for (var ci = 1; ci < ring.length; ci++) {
+            var p = map.project([ring[ci][0], ring[ci][1]]);
+            shadowCtx.lineTo(p.x, p.y);
+          }
+          shadowCtx.closePath();
+        }
+      }
     }
-    if (!map.getLayer(SHADOW_LAYER_ID)) {
-      var beforeLayerId = buildingLayerIds.length ? buildingLayerIds[0] : undefined;
-      map.addLayer({
-        id: SHADOW_LAYER_ID,
-        type: 'fill',
-        source: SHADOW_SOURCE_ID,
-        paint: {
-          'fill-color': SHADOW_COLOR,
-          'fill-opacity': shadowsEnabled ? SHADOW_OPACITY : 0,
-        },
-      }, beforeLayerId);
-    }
+    // nonzero fill: overlapping subpaths are filled once — no alpha stacking.
+    shadowCtx.fill('nonzero');
   }
 
   function computeShadowGeoJSON(buildings, sun, refLatDeg, options) {
@@ -603,75 +633,6 @@ export const MAP_HTML = `<!DOCTYPE html>
     return { type: 'FeatureCollection', features: features };
   }
 
-  function dissolveShadows(shadowFC) {
-    if (!shadowFC.features.length) return shadowFC;
-    if (shadowFC.features.length > MAX_DISSOLVE_FEATURES) {
-      return shadowFC;
-    }
-    if (!window.polygonClipping || typeof window.polygonClipping.union !== 'function') {
-      return shadowFC;
-    }
-
-    function isPos(p) {
-      return Array.isArray(p) && p.length >= 2 &&
-        typeof p[0] === 'number' && typeof p[1] === 'number';
-    }
-    function isRing(r) {
-      return Array.isArray(r) && r.length >= 4 && isPos(r[0]);
-    }
-    function isPolygonCoords(c) {
-      return Array.isArray(c) && c.length > 0 && isRing(c[0]);
-    }
-    function isMultiPolygonCoords(c) {
-      return Array.isArray(c) && c.length > 0 && isPolygonCoords(c[0]);
-    }
-    function toMultiPolygonCoords(c) {
-      if (isMultiPolygonCoords(c)) return c;
-      if (isPolygonCoords(c)) return [c];
-      return null;
-    }
-
-    try {
-      var polys = [];
-      for (var i = 0; i < shadowFC.features.length; i++) {
-        var coords = shadowFC.features[i].geometry.coordinates;
-        var mp = toMultiPolygonCoords(coords);
-        if (mp) polys.push(mp);
-      }
-      if (!polys.length) return emptyShadowCollection();
-
-      // Pairwise reduction is more stable than a long sequential union chain.
-      var queue = polys.slice();
-      while (queue.length > 1) {
-        var next = [];
-        for (var j = 0; j < queue.length; j += 2) {
-          if (j + 1 < queue.length) {
-            next.push(window.polygonClipping.union(queue[j], queue[j + 1]));
-          } else {
-            next.push(queue[j]);
-          }
-        }
-        queue = next;
-      }
-      var merged = queue[0];
-
-      var mergedMulti = toMultiPolygonCoords(merged);
-      if (!mergedMulti || !mergedMulti.length) return emptyShadowCollection();
-
-      return {
-        type: 'FeatureCollection',
-        // One dissolved geometry -> one alpha application across the final shadow surface.
-        features: [{
-          type: 'Feature',
-          geometry: { type: 'MultiPolygon', coordinates: mergedMulti },
-          properties: {},
-        }],
-      };
-    } catch (_) {
-      return shadowFC;
-    }
-  }
-
   function updateShadows() {
     if (!mapLoaded) return;
     if (shadowUpdateInFlight) {
@@ -680,8 +641,6 @@ export const MAP_HTML = `<!DOCTYPE html>
     }
     shadowUpdateInFlight = true;
     try {
-      ensureShadowLayer();
-
       var buildings = queryBuildings();
       var center = map.getCenter();
       var sun = getSunPos(currentDate, center.lat, center.lng);
@@ -693,7 +652,6 @@ export const MAP_HTML = `<!DOCTYPE html>
         map.getBearing().toFixed(1),
         Math.floor(currentDate.getTime() / 60_000),
         buildings.features.length,
-        isScrubbing ? 1 : 0,
         shadowsEnabled ? 1 : 0,
       ].join('|');
 
@@ -703,29 +661,14 @@ export const MAP_HTML = `<!DOCTYPE html>
       }
       lastShadowKey = shadowKey;
 
-      var rawShadowData = computeShadowGeoJSON(
-        buildings,
-        sun,
-        center.lat,
-        isScrubbing
-          ? { maxPoints: MAX_SHADOW_RING_POINTS_SCRUB }
-          : undefined,
-      );
+      var rawShadowData = computeShadowGeoJSON(buildings, sun, center.lat);
       emitCafeSunStatus(rawShadowData, sun.altitude);
-      var shadowData = isScrubbing ? rawShadowData : dissolveShadows(rawShadowData);
-      var src = map.getSource(SHADOW_SOURCE_ID);
-      if (src) src.setData(shadowData);
+      lastRawShadowData = rawShadowData;
+      drawShadowCanvas(rawShadowData);
       if (nightOverlay) {
         var isNight = sun.altitude < MIN_SUN_ALT_RAD;
         nightOverlay.style.opacity =
           shadowsEnabled && isNight ? String(NIGHT_OVERLAY_OPACITY) : '0';
-      }
-      if (map.getLayer(SHADOW_LAYER_ID)) {
-        map.setPaintProperty(
-          SHADOW_LAYER_ID,
-          'fill-opacity',
-          shadowsEnabled ? (isScrubbing ? SHADOW_OPACITY_FAST : SHADOW_OPACITY) : 0
-        );
       }
 
       sendStatus(buildings.features.length);
@@ -825,7 +768,7 @@ export const MAP_HTML = `<!DOCTYPE html>
       try { map.removeLayer(id); } catch (_) {}
     });
 
-    ensureShadowLayer();
+    initShadowCanvas();
     ensureCafeSource();
     if (cafeFeatures.length) {
       var cafeSrc = map.getSource(CAFE_SOURCE_ID);
@@ -856,6 +799,11 @@ export const MAP_HTML = `<!DOCTYPE html>
     renderCafeMarkers();
     setTimeout(function () { scheduleShadowUpdate(0); }, 250);
     postToRN({ type: 'MAP_READY' });
+  });
+
+  // Redraw canvas every frame during pan/zoom/rotate (just re-projects existing geo coords — fast).
+  map.on('move', function () {
+    drawShadowCanvas(lastRawShadowData);
   });
 
   map.on('moveend', function () {
@@ -890,13 +838,8 @@ export const MAP_HTML = `<!DOCTYPE html>
 
         case 'SET_SHADOWS':
           shadowsEnabled = msg.enabled;
-          if (map.getLayer(SHADOW_LAYER_ID)) {
-            map.setPaintProperty(
-              SHADOW_LAYER_ID,
-              'fill-opacity',
-              shadowsEnabled ? SHADOW_OPACITY : 0
-            );
-          }
+          if (shadowCanvas) shadowCanvas.style.opacity = shadowsEnabled ? String(SHADOW_OPACITY) : '0';
+          drawShadowCanvas(lastRawShadowData);
           scheduleShadowUpdate(0);
           break;
 
