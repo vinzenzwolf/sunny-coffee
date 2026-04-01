@@ -712,8 +712,9 @@ export const MAP_HTML = `<!DOCTYPE html>
           : undefined,
       );
       emitCafeSunStatus(rawShadowData, sun.altitude);
+      var shadowData = isScrubbing ? rawShadowData : dissolveShadows(rawShadowData);
       var src = map.getSource(SHADOW_SOURCE_ID);
-      if (src) src.setData(rawShadowData);
+      if (src) src.setData(shadowData);
       if (nightOverlay) {
         var isNight = sun.altitude < MIN_SUN_ALT_RAD;
         nightOverlay.style.opacity =
@@ -723,7 +724,7 @@ export const MAP_HTML = `<!DOCTYPE html>
         map.setPaintProperty(
           SHADOW_LAYER_ID,
           'fill-opacity',
-          shadowsEnabled ? SHADOW_OPACITY_FAST : 0
+          shadowsEnabled ? (isScrubbing ? SHADOW_OPACITY_FAST : SHADOW_OPACITY) : 0
         );
       }
 

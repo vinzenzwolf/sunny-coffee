@@ -15,7 +15,8 @@ import logging
 import os
 import warnings
 from concurrent.futures import ProcessPoolExecutor
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from math import tan, radians, cos, sin
 from typing import Any
 
@@ -32,7 +33,7 @@ EARTH_CIRC_M = 111_320
 MIN_SUN_ALTITUDE_DEG = 1.0
 MAX_SHADOW_LENGTH_M = 400.0
 SLOT_MINUTES = 5
-TZ = timezone(timedelta(hours=1))  # CET (approximate)
+COPENHAGEN_TZ = ZoneInfo("Europe/Copenhagen")
 COPENHAGEN_CENTER = (55.6761, 12.5683)
 
 # ---------------------------------------------------------------------------
@@ -85,7 +86,7 @@ async def load_buildings_from_db() -> list[dict]:
             coords = row["coords"]
             if isinstance(coords, str):
                 coords = json.loads(coords)
-            buildings.append({"coords": [tuple(c) for c in coords], "height_m": row["height_m"]})
+            buildings.append({"coords": [tuple(c) for c in coords], "height_m": row.get("height_m") or 10.0})
         if len(rows) < page_size:
             break
         offset += page_size
@@ -139,7 +140,7 @@ def _precompute_sun_slots(target_date: date) -> list[tuple[int, float, float]]:
         for slot in range(total_slots):
             minutes = slot * SLOT_MINUTES
             dt = datetime(target_date.year, target_date.month, target_date.day,
-                          minutes // 60, minutes % 60, 0, tzinfo=TZ)
+                          minutes // 60, minutes % 60, 0, tzinfo=COPENHAGEN_TZ)
             alt = get_altitude(lat, lng, dt)
             if alt >= MIN_SUN_ALTITUDE_DEG:
                 slots.append((slot, alt, get_azimuth(lat, lng, dt)))
@@ -220,8 +221,7 @@ def _slot_range(start: int, end: int) -> dict:
 
 async def compute_all_sun_windows(target_date: date | None = None) -> None:
     if target_date is None:
-        from zoneinfo import ZoneInfo
-        target_date = datetime.now(ZoneInfo("Europe/Copenhagen")).date()
+        target_date = datetime.now(COPENHAGEN_TZ).date()
 
     logger.info(f"=== Starting sun window computation for {target_date} ===")
 
