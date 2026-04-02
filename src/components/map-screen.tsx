@@ -1121,6 +1121,10 @@ export default function MapScreen() {
               topInset={insets.top}
               bottomInset={cardBottom}
               onBrowse={() => animateToTab('explore')}
+              onSelectCafe={(cafe) => {
+                handleSelectCafe(cafe);
+                animateToTab('map');
+              }}
             />
           </View>
 

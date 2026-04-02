@@ -21,6 +21,8 @@ const CHART_RANGE = CHART_END - CHART_START;
 
 type SunInterval = { start: string; end: string };
 
+
+
 function parseHHmm(value: string): number | null {
   const match = value.match(/^(\d{1,2}):(\d{2})$/);
   if (!match) return null;
@@ -44,12 +46,6 @@ function nowMinutesInCopenhagen(now = new Date()): number {
   return hour * 60 + minute;
 }
 
-function sunSummary(intervals: SunInterval[]): string {
-  if (!intervals.length) return 'No direct sun windows available today';
-  const top = intervals.slice(0, 3).map((it) => `${it.start}-${it.end}`).join('  ·  ');
-  return `Sun today: ${top}`;
-}
-
 function todayOpenLabel(cafe: Cafe): string {
   const open = getOpenUntilToday(cafe.metadata?.openingHours);
   if (open.isOpen && open.closesAt) return `Open until ${open.closesAt}`;
@@ -57,20 +53,29 @@ function todayOpenLabel(cafe: Cafe): string {
   return 'Closed now';
 }
 
-function chartSegments(intervals: SunInterval[]): { left: `${number}%`; width: `${number}%` }[] {
-  return intervals
-    .map((it) => {
-      const start = parseHHmm(it.start);
-      const end = parseHHmm(it.end);
-      if (start === null || end === null || end <= start) return null;
-      const clippedStart = Math.max(CHART_START, Math.min(CHART_END, start));
-      const clippedEnd = Math.max(CHART_START, Math.min(CHART_END, end));
-      if (clippedEnd <= clippedStart) return null;
-      const leftPct = ((clippedStart - CHART_START) / CHART_RANGE) * 100;
-      const widthPct = ((clippedEnd - clippedStart) / CHART_RANGE) * 100;
-      return { left: `${leftPct}%`, width: `${widthPct}%` };
-    })
-    .filter((seg): seg is { left: `${number}%`; width: `${number}%` } => seg !== null);
+type ChartData = {
+  segments: { left: `${number}%`; width: `${number}%` }[];
+  labels: { label: string; left: `${number}%`; width: `${number}%` }[];
+};
+
+function chartData(intervals: SunInterval[]): ChartData {
+  const segments: ChartData['segments'] = [];
+  const labels: SegmentLabel[] = [];
+
+  for (const it of intervals) {
+    const start = parseHHmm(it.start);
+    const end = parseHHmm(it.end);
+    if (start === null || end === null || end <= start) continue;
+    const clippedStart = Math.max(CHART_START, Math.min(CHART_END, start));
+    const clippedEnd = Math.max(CHART_START, Math.min(CHART_END, end));
+    if (clippedEnd <= clippedStart) continue;
+    const leftPct = ((clippedStart - CHART_START) / CHART_RANGE) * 100;
+    const widthPct = ((clippedEnd - clippedStart) / CHART_RANGE) * 100;
+    segments.push({ left: `${leftPct}%`, width: `${widthPct}%` });
+    labels.push({ label: `${it.start}–${it.end}`, left: `${leftPct}%`, width: `${widthPct}%` });
+  }
+
+  return { segments, labels };
 }
 
 async function openCafeInGoogleMaps(cafe: Cafe): Promise<void> {
@@ -106,9 +111,10 @@ type Props = {
   topInset: number;
   bottomInset: number;
   onBrowse: () => void;
+  onSelectCafe?: (cafe: Cafe) => void;
 };
 
-export default function SavedTab({ topInset, bottomInset, onBrowse }: Props) {
+export default function SavedTab({ topInset, bottomInset, onBrowse, onSelectCafe }: Props) {
   const { user } = useAuth();
   const { cafes } = useCafeData();
   const { savedIds, toggle } = useSavedCafes();
@@ -182,12 +188,18 @@ export default function SavedTab({ topInset, bottomInset, onBrowse }: Props) {
         <View style={styles.list}> 
           {savedCafes.map((cafe) => {
             const intervals = cafe.metadata?.sunWindows ?? [];
-            const segments = chartSegments(intervals);
+            const { segments, labels } = chartData(intervals);
             return (
-              <View key={cafe.id} style={styles.card}> 
-                <View style={styles.cardHeader}> 
-                  <View style={styles.cardTitleWrap}> 
-                    <Text style={styles.cardName} numberOfLines={1}>{cafe.name}</Text>
+              <View key={cafe.id} style={styles.card}>
+                <View style={styles.cardHeader}>
+                  <View style={styles.cardTitleWrap}>
+                    <TouchableOpacity
+                      onPress={() => onSelectCafe?.(cafe)}
+                      activeOpacity={onSelectCafe ? 0.6 : 1}
+                      disabled={!onSelectCafe}
+                    >
+                      <Text style={styles.cardName} numberOfLines={1}>{cafe.name}</Text>
+                    </TouchableOpacity>
                     <Text style={styles.cardOpen}>{todayOpenLabel(cafe)}</Text>
                   </View>
                   <View style={styles.cardActions}>
@@ -210,9 +222,7 @@ export default function SavedTab({ topInset, bottomInset, onBrowse }: Props) {
                   </View>
                 </View>
 
-                <Text style={styles.sunSummary}>{sunSummary(intervals)}</Text>
-
-                <View style={styles.chartWrap}> 
+                <View style={styles.chartWrap}>
                   <View style={styles.chartTrack}>
                     {segments.map((seg, idx) => (
                       <View
@@ -223,11 +233,19 @@ export default function SavedTab({ topInset, bottomInset, onBrowse }: Props) {
                     <View style={[styles.chartNowMarker, { left: nowMarkerPct }]} />
                   </View>
 
-                  <View style={styles.chartLabels}> 
-                    <Text style={styles.chartLabel}>06:00</Text>
-                    <Text style={styles.chartLabel}>14:00</Text>
-                    <Text style={styles.chartLabel}>22:00</Text>
-                  </View>
+                  {labels.length > 0 && (
+                    <View style={styles.chartLabelRow}>
+                      {labels.map((lbl, idx) => (
+                        <Text
+                          key={`${cafe.id}-lbl-${idx}`}
+                          style={[styles.chartWindowLabel, { left: lbl.left, width: lbl.width }]}
+                          numberOfLines={1}
+                        >
+                          {lbl.label}
+                        </Text>
+                      ))}
+                    </View>
+                  )}
                 </View>
 
                 <Text numberOfLines={1} style={styles.addressLine}>
@@ -333,12 +351,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  sunSummary: {
-    fontSize: 12,
-    color: '#5F5A54',
-    marginBottom: 10,
-  },
-
   chartWrap: {
     marginBottom: 10,
   },
@@ -365,14 +377,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#2B2723',
     opacity: 0.85,
   },
-  chartLabels: {
-    marginTop: 6,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  chartLabelRow: {
+    position: 'relative',
+    height: 16,
+    marginTop: 4,
   },
-  chartLabel: {
-    fontSize: 10,
-    color: '#9A948D',
+  chartWindowLabel: {
+    position: 'absolute',
+    textAlign: 'center',
+    fontSize: 9,
+    color: '#C48A2E',
+    fontWeight: '500',
+    letterSpacing: 0.1,
   },
 
   addressLine: {
