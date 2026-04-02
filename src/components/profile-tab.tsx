@@ -101,7 +101,17 @@ function ProfileLoggedIn({ topInset, bottomInset, onAboutLogoPress }: Props & { 
         {/* Location section */}
         <Text style={styles.sectionLabel}>Location</Text>
         <View style={styles.group}>
-          <View style={styles.row}>
+          <TouchableOpacity
+            style={styles.row}
+            activeOpacity={0.7}
+            onPress={() =>
+              Alert.alert(
+                'Only available in Copenhagen',
+                'Sunny Coffee currently only works in Copenhagen.',
+                [{ text: 'Got it' }],
+              )
+            }
+          >
             <View style={[styles.rowIcon, { backgroundColor: '#EEF4FF' }]}>
               <Ionicons name="location-outline" size={18} color="#5080D0" />
             </View>
@@ -111,7 +121,7 @@ function ProfileLoggedIn({ topInset, bottomInset, onAboutLogoPress }: Props & { 
             </View>
             <Text style={styles.rowValue}>Copenhagen</Text>
             <Ionicons name="chevron-forward" size={16} color="#1C1B19" style={styles.chevron} />
-          </View>
+          </TouchableOpacity>
           <View style={[styles.row, styles.rowBorder]}>
             <View style={[styles.rowIcon, { backgroundColor: '#EEF4FF' }]}>
               <Ionicons name="navigate-outline" size={18} color="#5080D0" />
@@ -169,89 +179,91 @@ function ProfileLoggedIn({ topInset, bottomInset, onAboutLogoPress }: Props & { 
 // ---------------------------------------------------------------------------
 
 function ProfileLogin({ topInset, bottomInset, onAboutLogoPress }: Props & { onAboutLogoPress: () => void }) {
-  const { signInWithGoogle } = useAuth();
-  const [signingIn, setSigningIn] = useState(false);
+  const { signInWithGoogle, signInWithApple } = useAuth();
+  const [loading, setLoading] = useState<'google' | 'apple' | null>(null);
 
-  const handleGoogle = async () => {
-    setSigningIn(true);
-    try {
-      await signInWithGoogle();
-    } finally {
-      setSigningIn(false);
-    }
+  const wrap = async (provider: 'google' | 'apple', fn: () => Promise<void>) => {
+    setLoading(provider);
+    try { await fn(); } catch { /* dismissed */ }
+    setLoading(null);
   };
 
   return (
-    <View style={[styles.container, { paddingTop: topInset }]}>
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={[styles.loginContent, { paddingBottom: bottomInset + 24 }]}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>
-            Your <Text style={styles.headerItalic}>profile</Text>
-          </Text>
-        </View>
-
-        {/* Hero */}
-        <View style={styles.loginHero}>
-          <View style={styles.loginAvatarBox}>
-            <Text style={styles.loginAvatarEmoji}>☀️</Text>
-          </View>
-          <Text style={styles.loginTitle}>Sign in to save your{'\n'}favourite sun spots</Text>
-          <Text style={styles.loginSub}>Access your saved cafés across devices.</Text>
-        </View>
-
-        {/* Google button */}
-        <TouchableOpacity
-          style={[styles.socialBtn, styles.googleBtn]}
-          onPress={handleGoogle}
-          activeOpacity={0.85}
-          disabled={signingIn}
-        >
-          {signingIn ? (
-            <ActivityIndicator color="#333" size="small" />
-          ) : (
-            <>
-              <Ionicons name="logo-google" size={18} color="#333" style={styles.socialIcon} />
-              <Text style={[styles.socialText, { color: '#333' }]}>Continue with Google</Text>
-            </>
-          )}
-        </TouchableOpacity>
-
-        {/* Apple placeholder */}
-        <TouchableOpacity
-          style={[styles.socialBtn, styles.appleBtn]}
-          activeOpacity={0.85}
-          disabled
-        >
-          <Ionicons name="logo-apple" size={18} color="#fff" style={styles.socialIcon} />
-          <Text style={[styles.socialText, { color: '#fff' }]}>Continue with Apple</Text>
-        </TouchableOpacity>
-
-        <Text style={styles.legalText}>
-          By continuing you agree to our Terms of Service and Privacy Policy.
+    <ScrollView
+      style={[styles.container, { paddingTop: topInset }]}
+      contentContainerStyle={[styles.loginContent, { paddingBottom: bottomInset + 24 }]}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>
+          Your <Text style={styles.headerItalic}>profile</Text>
         </Text>
+      </View>
 
-        {/* About */}
-        <Text style={styles.sectionLabel}>About</Text>
-        <View style={styles.aboutCard}>
-          <TouchableOpacity onPress={onAboutLogoPress} activeOpacity={0.85}>
-            <Text style={styles.aboutLogo}>
-              sunny <Text style={styles.aboutLogoItalic}>coffee</Text>
-            </Text>
-          </TouchableOpacity>
-          <Text style={styles.aboutVersion}>Version 1.0.0 · Made in Copenhagen</Text>
-          <View style={styles.aboutLinks}>
-            <Text style={styles.aboutLink}>Privacy</Text>
-            <Text style={styles.aboutLink}>Terms</Text>
-            <Text style={styles.aboutLink}>Feedback</Text>
-          </View>
+      {/* Hero */}
+      <View style={styles.loginHero}>
+        <View style={styles.loginAvatarBox}>
+          <Text style={styles.loginAvatarEmoji}>☀️</Text>
         </View>
-      </ScrollView>
-    </View>
+        <Text style={styles.loginTitle}>Sign in to save your{'\n'}favourite sun spots</Text>
+        <Text style={styles.loginSub}>Access your saved cafés across devices.</Text>
+      </View>
+
+      {/* Google */}
+      <TouchableOpacity
+        style={[styles.socialBtn, styles.googleBtn, loading && loading !== 'google' && styles.socialBtnDimmed]}
+        onPress={() => wrap('google', signInWithGoogle)}
+        activeOpacity={0.85}
+        disabled={!!loading}
+      >
+        {loading === 'google' ? (
+          <ActivityIndicator color="#333" size="small" />
+        ) : (
+          <>
+            <Ionicons name="logo-google" size={18} color="#333" style={styles.socialIcon} />
+            <Text style={[styles.socialText, { color: '#333' }]}>Continue with Google</Text>
+          </>
+        )}
+      </TouchableOpacity>
+
+      {/* Apple */}
+      <TouchableOpacity
+        style={[styles.socialBtn, styles.appleBtn, loading && loading !== 'apple' && styles.socialBtnDimmed]}
+        onPress={() => wrap('apple', signInWithApple)}
+        activeOpacity={0.85}
+        disabled={!!loading}
+      >
+        {loading === 'apple' ? (
+          <ActivityIndicator color="#333" size="small" />
+        ) : (
+          <>
+            <Ionicons name="logo-apple" size={18} color="#333" style={styles.socialIcon} />
+            <Text style={[styles.socialText, { color: '#333' }]}>Continue with Apple</Text>
+          </>
+        )}
+      </TouchableOpacity>
+
+      <Text style={styles.legalText}>
+        By continuing you agree to our Terms of Service and Privacy Policy.
+      </Text>
+
+      {/* About */}
+      <Text style={styles.sectionLabel}>About</Text>
+      <View style={styles.aboutCard}>
+        <TouchableOpacity onPress={onAboutLogoPress} activeOpacity={0.85}>
+          <Text style={styles.aboutLogo}>
+            sunny <Text style={styles.aboutLogoItalic}>coffee</Text>
+          </Text>
+        </TouchableOpacity>
+        <Text style={styles.aboutVersion}>Version 1.0.0 · Made in Copenhagen</Text>
+        <View style={styles.aboutLinks}>
+          <Text style={styles.aboutLink}>Privacy</Text>
+          <Text style={styles.aboutLink}>Terms</Text>
+          <Text style={styles.aboutLink}>Feedback</Text>
+        </View>
+      </View>
+    </ScrollView>
   );
 }
 
@@ -542,8 +554,16 @@ const styles = StyleSheet.create({
     }),
   },
   appleBtn: {
-    backgroundColor: '#1C1B19',
-    opacity: 0.35,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#E8E4DF',
+    ...Platform.select({
+      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4 },
+      android: { elevation: 1 },
+    }),
+  },
+  socialBtnDimmed: {
+    opacity: 0.4,
   },
   socialIcon: {
     marginRight: 10,

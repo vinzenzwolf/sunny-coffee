@@ -27,10 +27,9 @@
 import * as Location from 'expo-location';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   Animated,
-  GestureResponderEvent,
   Keyboard,
-  LayoutChangeEvent,
   Linking,
   PanResponder,
   ScrollView,
@@ -53,7 +52,7 @@ import { useLocationSettings } from '../context/location-settings-context';
 import { useSavedCafes } from '../context/saved-cafes-context';
 import { getDaylight } from '../services/sun-position';
 import { throttle } from '../utils/debounce';
-import ExploreTab from './explore-tab';
+import { getOpenUntilToday } from '../utils/opening-hours';
 import ProfileTab from './profile-tab';
 import SavedTab from './saved-tab';
 import { TimeControls } from './time-controls';
@@ -77,6 +76,86 @@ function uniqueId(): string {
   return Math.random().toString(36).slice(2);
 }
 
+const CPH_LAT = 55.6761;
+const CPH_LNG = 12.5683;
+const CPH_RADIUS_KM = 30;
+
+function kmFromCopenhagen(lat: number, lng: number): number {
+  const R = 6371;
+  const dLat = (lat - CPH_LAT) * (Math.PI / 180);
+  const dLng = (lng - CPH_LNG) * (Math.PI / 180);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(CPH_LAT * (Math.PI / 180)) * Math.cos(lat * (Math.PI / 180)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function parseHHmmToMinutes(value: string): number | null {
+  const match = value.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  const h = Number(match[1]);
+  const m = Number(match[2]);
+  if (Number.isNaN(h) || Number.isNaN(m)) return null;
+  return h * 60 + m;
+}
+
+function computeSunSegments(
+  sunWindows: { start: string; end: string }[],
+  sunriseMinutes: number,
+  sunsetMinutes: number,
+): { left: `${number}%`; width: `${number}%` }[] {
+  const range = sunsetMinutes - sunriseMinutes;
+  if (range <= 0) return [];
+  return sunWindows
+    .map((w) => {
+      const start = parseHHmmToMinutes(w.start);
+      const end   = parseHHmmToMinutes(w.end);
+      if (start === null || end === null || end <= start) return null;
+      const cs = Math.max(sunriseMinutes, Math.min(sunsetMinutes, start));
+      const ce = Math.max(sunriseMinutes, Math.min(sunsetMinutes, end));
+      if (ce <= cs) return null;
+      const leftPct  = ((cs - sunriseMinutes) / range) * 100;
+      const widthPct = ((ce - cs) / range) * 100;
+      return { left: `${leftPct}%` as `${number}%`, width: `${widthPct}%` as `${number}%` };
+    })
+    .filter((s): s is { left: `${number}%`; width: `${number}%` } => s !== null);
+}
+
+function vcChartData(windows: { start: string; end: string }[]) {
+  const segments: { left: `${number}%`; width: `${number}%` }[] = [];
+  const candidates: { centerPct: number; text: string }[] = [];
+
+  for (const w of windows) {
+    const start = parseHHmmToMinutes(w.start);
+    const end   = parseHHmmToMinutes(w.end);
+    if (start === null || end === null || end <= start) continue;
+    const cs = Math.max(VC_CHART_START, Math.min(VC_CHART_END, start));
+    const ce = Math.max(VC_CHART_START, Math.min(VC_CHART_END, end));
+    if (ce <= cs) continue;
+    const leftPct  = ((cs - VC_CHART_START) / VC_CHART_RANGE) * 100;
+    const widthPct = ((ce - cs) / VC_CHART_RANGE) * 100;
+    segments.push({ left: `${leftPct}%` as `${number}%`, width: `${widthPct}%` as `${number}%` });
+    const sh = Math.floor(start / 60), sm = start % 60;
+    const eh = Math.floor(end / 60),   em = end % 60;
+    candidates.push({
+      centerPct: leftPct + widthPct / 2,
+      text: `${String(sh).padStart(2, '0')}:${String(sm).padStart(2, '0')}–${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`,
+    });
+  }
+
+  const labels: { text: string; left: `${number}%` }[] = [];
+  let lastRightEdge = -Infinity;
+  for (const c of candidates) {
+    const rawLeft = c.centerPct - VC_LABEL_WIDTH_PCT / 2;
+    const left = Math.max(0, Math.min(100 - VC_LABEL_WIDTH_PCT, rawLeft));
+    if (left >= lastRightEdge - 1) {
+      labels.push({ text: c.text, left: `${left}%` as `${number}%` });
+      lastRightEdge = left + VC_LABEL_WIDTH_PCT;
+    }
+  }
+  return { segments, labels };
+}
+
 function minuteStamp(date: Date): number {
   return Math.floor(date.getTime() / 60_000);
 }
@@ -97,19 +176,20 @@ type WebViewMessage =
 // Nav items config
 // ---------------------------------------------------------------------------
 
-type NavKey = 'map' | 'explore' | 'saved' | 'profile';
+type NavKey = 'map' | 'saved' | 'profile';
 type NavItem = { key: NavKey; label: string; icon: keyof typeof Ionicons.glyphMap; iconActive: keyof typeof Ionicons.glyphMap };
 
 const NAV_ITEMS: NavItem[] = [
   { key: 'map',     label: 'Map',     icon: 'map-outline',      iconActive: 'map' },
-  { key: 'explore', label: 'Explore', icon: 'search-outline',   iconActive: 'search' },
   { key: 'saved',   label: 'Saved',   icon: 'bookmark-outline', iconActive: 'bookmark' },
   { key: 'profile', label: 'Profile', icon: 'person-outline',   iconActive: 'person' },
 ];
 const NAV_KEYS: NavKey[] = NAV_ITEMS.map((item) => item.key);
 const TAB_ANIMATION_DURATION_MS = 320;
-const TOOLTIP_WIDTH = 52;
-const VC_SLIDER_TOUCH_INSET_X = 8;
+const VC_CHART_START = 6 * 60;
+const VC_CHART_END   = 22 * 60;
+const VC_CHART_RANGE = VC_CHART_END - VC_CHART_START;
+const VC_LABEL_WIDTH_PCT = 19;
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -166,95 +246,44 @@ function DirectionsButton({ cafeId, lat, lng }: { cafeId: string; lat: number; l
   );
 }
 
+function todayOpenStatus(cafe: Cafe): { label: string; color: string } {
+  const result = getOpenUntilToday(cafe.metadata?.openingHours);
+  if (result.isOpen) return { label: result.closesAt ? `Open until ${result.closesAt}` : 'Open now', color: '#4A9B6F' };
+  if (result.reason === 'closed_today') return { label: 'Closed today', color: '#A39D95' };
+  if (result.reason === 'no_data') return { label: 'No opening hours', color: '#C8C4BF' };
+  return { label: 'Closed now', color: '#A39D95' };
+}
+
 function VenueCard({
   cafe,
-  date,
   bottom,
-  sunriseMinutes,
-  sunsetMinutes,
   onDismiss,
-  onDateChange,
-  onSetNow,
-  isLive,
-  onScrubStart,
-  onScrubEnd,
 }: {
   cafe: Cafe;
-  date: Date;
   bottom: number;
-  sunriseMinutes: number;
-  sunsetMinutes: number;
   onDismiss: () => void;
-  onDateChange: (d: Date) => void;
-  onSetNow?: () => void;
-  isLive?: boolean;
-  onScrubStart?: () => void;
-  onScrubEnd?: () => void;
 }) {
-  const [sliderWidth, setSliderWidth] = useState(0);
-  const scrubMinutesRef = useRef<number | null>(null);
-  const lastSliderMinutes = useRef<number | null>(null);
-  const [isScrubbing, setIsScrubbing] = useState(false);
-  const [scrubMinutes, setScrubMinutes] = useState<number | null>(null);
-
-  const range = sunsetMinutes - sunriseMinutes;
-  const rawMinutes = isFinite(date.getTime())
-    ? date.getHours() * 60 + date.getMinutes()
-    : sunriseMinutes;
-  const nowMinutes = (() => {
-    const now = new Date();
-    return now.getHours() * 60 + now.getMinutes();
-  })();
-  const stateLabel = isLive ? 'LIVE' : rawMinutes < nowMinutes ? 'PAST' : 'PREVIEW';
-  const labelMinutes = scrubMinutes ?? rawMinutes;
-  const displayedMinutes = Math.min(Math.max(labelMinutes, sunriseMinutes), sunsetMinutes);
-  const dayFraction = range > 0 ? (displayedMinutes - sunriseMinutes) / range : 0;
-  const tooltipLeft = (() => {
-    if (!sliderWidth) return `${dayFraction * 100}%` as `${number}%`;
-    const x = dayFraction * sliderWidth;
-    const clamped = Math.max(0, Math.min(sliderWidth - TOOLTIP_WIDTH, x - TOOLTIP_WIDTH / 2));
-    return clamped;
-  })();
-  const timeLabel = (() => {
-    const h = Math.floor(labelMinutes / 60);
-    const m = labelMinutes % 60;
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-  })();
-
-  const handleLayout = useCallback((e: LayoutChangeEvent) => {
-    const width = e.nativeEvent.layout.width;
-    if (width !== sliderWidth) setSliderWidth(width);
-  }, [sliderWidth]);
-
-  const handleTouch = useCallback(
-    (e: GestureResponderEvent) => {
-      if (sliderWidth === 0) return;
-      const x = e.nativeEvent.locationX - VC_SLIDER_TOUCH_INSET_X;
-      const fraction = x / sliderWidth;
-      if (!isFinite(fraction)) return;
-      const clamped = Math.min(Math.max(fraction, 0), 1);
-      const minutes = Math.round(sunriseMinutes + clamped * range);
-      if (!isFinite(minutes)) return;
-      if (lastSliderMinutes.current === minutes) return;
-      lastSliderMinutes.current = minutes;
-      scrubMinutesRef.current = minutes;
-      setScrubMinutes(minutes);
-      const next = new Date(date);
-      next.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
-      if (!isFinite(next.getTime())) return;
-      onDateChange(next);
-    },
-    [date, sunriseMinutes, range, onDateChange, sliderWidth],
+  const { segments, labels } = useMemo(
+    () => vcChartData(cafe.metadata?.sunWindows ?? []),
+    [cafe.metadata?.sunWindows],
   );
+
+  const nowMarkerPct: `${number}%` = (() => {
+    const now = new Date();
+    const mins = now.getHours() * 60 + now.getMinutes();
+    const clamped = Math.max(VC_CHART_START, Math.min(VC_CHART_END, mins));
+    return `${((clamped - VC_CHART_START) / VC_CHART_RANGE) * 100}%`;
+  })();
 
   const distanceText = (() => {
     const km = cafe.metadata?.distanceKm;
-    const m = cafe.metadata?.distanceMeters;
+    const m  = cafe.metadata?.distanceMeters;
     if (typeof km === 'number') return `${km.toFixed(1)} km away`;
-    if (typeof m === 'number') return `${Math.round(m)}m away`;
+    if (typeof m  === 'number') return `${Math.round(m)}m away`;
     return null;
   })();
-  const metaParts = [distanceText].filter(Boolean);
+
+  const openStatus = todayOpenStatus(cafe);
 
   return (
     <View style={[vcStyles.card, { bottom }]}>
@@ -268,8 +297,9 @@ function VenueCard({
         </View>
         <View style={vcStyles.info}>
           <Text style={vcStyles.name} numberOfLines={1}>{cafe.name}</Text>
-          {metaParts.length > 0 && (
-            <Text style={vcStyles.meta} numberOfLines={1}>{metaParts.join(' · ')}</Text>
+          <Text style={[vcStyles.openStatus, { color: openStatus.color }]}>{openStatus.label}</Text>
+          {distanceText && (
+            <Text style={vcStyles.meta} numberOfLines={1}>{distanceText}</Text>
           )}
         </View>
         <View style={vcStyles.buttonRow}>
@@ -278,59 +308,29 @@ function VenueCard({
         </View>
       </View>
 
-      {/* Inset slider */}
-      <View style={vcStyles.sliderInset}>
-        <View style={vcStyles.sliderHead}>
-          <View style={[vcStyles.stateBadge, isLive ? vcStyles.stateBadgeLive : vcStyles.stateBadgePreview]}>
-            <Text style={[vcStyles.stateBadgeText, isLive ? vcStyles.stateBadgeTextLive : vcStyles.stateBadgeTextPreview]}>
-              {stateLabel}
-            </Text>
-          </View>
-          <TouchableOpacity style={[vcStyles.nowBtn, isLive && vcStyles.nowBtnHidden]} activeOpacity={0.8} onPress={onSetNow} disabled={isLive}>
-            <Text style={[vcStyles.nowBtnText, isLive && vcStyles.nowBtnTextHidden]}>Now</Text>
-          </TouchableOpacity>
+      {/* Sun window bar */}
+      <View style={vcStyles.chartWrap}>
+        <View style={vcStyles.chartTrack}>
+          {segments.map((seg, idx) => (
+            <View key={idx} style={[vcStyles.chartSunSegment, { left: seg.left, width: seg.width }]} />
+          ))}
+          <View style={[vcStyles.chartNowMarker, { left: nowMarkerPct }]} />
         </View>
-        <View
-          style={vcStyles.sliderArea}
-          onStartShouldSetResponder={() => true}
-          onMoveShouldSetResponder={() => true}
-          onResponderTerminationRequest={() => false}
-          onResponderGrant={(e) => {
-            setIsScrubbing(true);
-            onScrubStart?.();
-            handleTouch(e);
-          }}
-          onResponderMove={handleTouch}
-          onResponderRelease={() => {
-            const m = scrubMinutesRef.current;
-            if (m !== null && isFinite(m)) {
-              const next = new Date(date);
-              next.setHours(Math.floor(m / 60), m % 60, 0, 0);
-              if (isFinite(next.getTime())) onDateChange(next);
-            }
-            scrubMinutesRef.current = null;
-            setIsScrubbing(false);
-            setScrubMinutes(null);
-            lastSliderMinutes.current = null;
-            onScrubEnd?.();
-          }}
-          onResponderTerminate={() => {
-            scrubMinutesRef.current = null;
-            setIsScrubbing(false);
-            setScrubMinutes(null);
-            lastSliderMinutes.current = null;
-            onScrubEnd?.();
-          }}
-        >
-          <View style={vcStyles.track} pointerEvents="none" onLayout={handleLayout}>
-            <View style={[vcStyles.fill, { width: `${dayFraction * 100}%` as `${number}%` }]} />
-            <View style={[vcStyles.thumbTooltip, { left: tooltipLeft }]}>
-              <Text style={vcStyles.thumbTooltipText}>{timeLabel}</Text>
-            </View>
-            <View style={[vcStyles.thumb, isScrubbing && vcStyles.thumbActive, { left: `${dayFraction * 100}%` as `${number}%` }]} />
+        {labels.length > 0 && (
+          <View style={vcStyles.chartLabelRow}>
+            {labels.map((lbl, idx) => (
+              <Text
+                key={idx}
+                style={[vcStyles.chartWindowLabel, { left: lbl.left, width: `${VC_LABEL_WIDTH_PCT}%` as `${number}%` }]}
+                numberOfLines={1}
+              >
+                {lbl.text}
+              </Text>
+            ))}
           </View>
-        </View>
+        )}
       </View>
+
     </View>
   );
 }
@@ -413,121 +413,50 @@ const vcStyles = StyleSheet.create({
     gap: 8,
     alignItems: 'center',
   },
-  sliderInset: {
-    backgroundColor: '#F8F6F3',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingTop: 12,
-    paddingBottom: 10,
+  chartWrap: {
+    marginTop: 12,
   },
-  sliderHead: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
+  chartTrack: {
+    position: 'relative',
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#ECE8E2',
+    overflow: 'hidden',
   },
-  stateBadge: {
-    minHeight: 24,
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 0,
-    borderWidth: 1,
-    justifyContent: 'center',
-  },
-  stateBadgeLive: {
-    backgroundColor: '#FEF3E2',
-    borderColor: '#F2C98C',
-  },
-  stateBadgePreview: {
-    backgroundColor: '#F2F0ED',
-    borderColor: '#DDD8D1',
-  },
-  stateBadgeText: {
-    fontSize: 10,
-    letterSpacing: 0.4,
-    fontWeight: '700',
-  },
-  stateBadgeTextLive: {
-    color: '#D88413',
-  },
-  stateBadgeTextPreview: {
-    color: '#8E8880',
-  },
-  nowBtn: {
-    minWidth: 50,
-    minHeight: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#DFDAD2',
-    backgroundColor: '#F6F3EF',
-    paddingHorizontal: 10,
-    paddingVertical: 0,
-  },
-  nowBtnHidden: {
-    opacity: 0,
-  },
-  nowBtnText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#5E5952',
-  },
-  nowBtnTextHidden: {
-    color: 'transparent',
-  },
-  sliderArea: {
-    marginTop: 8,
-    marginHorizontal: -8,
-    paddingHorizontal: 8,
-    paddingTop: 14,
-    paddingBottom: 14,
-  },
-  track: {
-    height: 4,
-    backgroundColor: '#EAE7E3',
-    borderRadius: 2,
-    overflow: 'visible',
-  },
-  fill: {
+  chartSunSegment: {
     position: 'absolute',
-    left: 0,
     top: 0,
     bottom: 0,
-    borderRadius: 2,
-    backgroundColor: '#F5A623',
+    borderRadius: 9,
+    backgroundColor: '#F2B24D',
   },
-  thumb: {
+  chartNowMarker: {
     position: 'absolute',
-    width: 16,
+    top: -2,
+    bottom: -2,
+    width: 2,
+    borderRadius: 1,
+    backgroundColor: '#2B2723',
+    opacity: 0.85,
+  },
+  chartLabelRow: {
+    position: 'relative',
     height: 16,
-    borderRadius: 8,
-    backgroundColor: '#F5A623',
-    borderWidth: 2.5,
-    borderColor: '#F8F6F3',
-    top: -6,
-    marginLeft: -8,
-    ...Platform.select({
-      ios: { shadowColor: '#F5A623', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.45, shadowRadius: 4 },
-      android: { elevation: 3 },
-    }),
+    marginTop: 4,
   },
-  thumbTooltip: {
+  chartWindowLabel: {
     position: 'absolute',
-    bottom: 12,
-    width: TOOLTIP_WIDTH,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-    backgroundColor: '#1C1B19',
-    alignItems: 'center',
+    textAlign: 'center',
+    fontSize: 9,
+    color: '#C48A2E',
+    fontWeight: '500',
+    letterSpacing: 0.1,
   },
-  thumbTooltipText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#fff',
+  openStatus: {
+    fontSize: 12,
+    fontWeight: '500',
+    marginBottom: 2,
   },
-  thumbActive: { transform: [{ scale: 1.15 }] },
 });
 
 function SearchBar({
@@ -721,9 +650,10 @@ export default function MapScreen() {
   const tabSlideX = useRef(new Animated.Value(0)).current;
   const prevScreenWidthRef = useRef(screenWidth);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const outsideAlertShownRef = useRef(false);
 
-  const DEFAULT_LAT = 55.6761;
-  const DEFAULT_LNG = 12.5683;
+  const DEFAULT_LAT = CPH_LAT;
+  const DEFAULT_LNG = CPH_LNG;
   const { sunriseMinutes, sunsetMinutes } = useMemo(() => {
     const lat = userLocation?.lat ?? DEFAULT_LAT;
     const lng = userLocation?.lng ?? DEFAULT_LNG;
@@ -815,6 +745,14 @@ export default function MapScreen() {
           buildPostMessage({ type: 'FLY_TO', lat, lng }),
         );
         hasInitialCameraFocusRef.current = true;
+        if (!outsideAlertShownRef.current && kmFromCopenhagen(lat, lng) > CPH_RADIUS_KM) {
+          outsideAlertShownRef.current = true;
+          Alert.alert(
+            'Only available in Copenhagen',
+            'Sunny Coffee currently only works in Copenhagen. The map will still show Copenhagen.',
+            [{ text: 'Got it' }],
+          );
+        }
       };
 
       if (!useMyLocation) {
@@ -1080,16 +1018,8 @@ export default function MapScreen() {
             {selectedCafe ? (
               <VenueCard
                 cafe={selectedCafe}
-                date={date}
                 bottom={cardBottom}
-                sunriseMinutes={sunriseMinutes}
-                sunsetMinutes={sunsetMinutes}
                 onDismiss={handleDismissCafe}
-                onDateChange={handleDateChange}
-                onSetNow={handleSetNow}
-                isLive={isLiveTime}
-                onScrubStart={handleScrubStart}
-                onScrubEnd={handleScrubEnd}
               />
             ) : (
               <TimeControls
@@ -1109,18 +1039,10 @@ export default function MapScreen() {
           </View>
 
           <View style={[styles.tabPage, { width: screenWidth }]}>
-            <ExploreTab
-              topInset={insets.top}
-              bottomInset={cardBottom}
-              cafes={cafes}
-            />
-          </View>
-
-          <View style={[styles.tabPage, { width: screenWidth }]}>
             <SavedTab
               topInset={insets.top}
               bottomInset={cardBottom}
-              onBrowse={() => animateToTab('explore')}
+              onBrowse={() => animateToTab('map')}
               onSelectCafe={(cafe) => {
                 handleSelectCafe(cafe);
                 animateToTab('map');

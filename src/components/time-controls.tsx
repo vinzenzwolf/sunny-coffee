@@ -23,7 +23,6 @@ interface TimeControlsProps {
   onScrubEnd?: () => void;
 }
 
-const ALL_TICK_HOURS = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21];
 const TOOLTIP_WIDTH = 52;
 
 function padTwo(n: number): string {
@@ -93,17 +92,12 @@ export function TimeControls({
   const displayedMinutes = Math.min(Math.max(labelMinutes, sunriseMinutes), sunsetMinutes);
   const range = sunsetMinutes - sunriseMinutes;
   const dayFraction = range > 0 ? (displayedMinutes - sunriseMinutes) / range : 0;
-  const displayedHour = Math.floor(labelMinutes / 60);
   const tooltipLeft = (() => {
     if (!sliderWidth) return `${dayFraction * 100}%` as `${number}%`;
     const x = dayFraction * sliderWidth;
     const clamped = Math.max(0, Math.min(sliderWidth - TOOLTIP_WIDTH, x - TOOLTIP_WIDTH / 2));
     return clamped;
   })();
-
-  const tickHours = ALL_TICK_HOURS.filter(
-    (h) => h * 60 >= sunriseMinutes && h * 60 <= sunsetMinutes,
-  );
 
   return (
     <View style={[styles.container, { bottom }]}>
@@ -154,7 +148,6 @@ export function TimeControls({
         }}
       >
         <View style={styles.track} pointerEvents="none">
-          <View style={[styles.fill, { width: `${dayFraction * 100}%` as `${number}%` }]} />
           <View style={[styles.thumbTooltip, { left: tooltipLeft }]}>
             <Text style={styles.thumbTooltipText}>{minutesToTimeString(labelMinutes)}</Text>
           </View>
@@ -167,23 +160,6 @@ export function TimeControls({
           />
         </View>
 
-        <View style={styles.ticks} pointerEvents="none">
-          {tickHours.map((h) => {
-            const tickFraction = range > 0 ? (h * 60 - sunriseMinutes) / range : 0;
-            return (
-              <Text
-                key={h}
-                style={[
-                  styles.tick,
-                  displayedHour === h && styles.tickActive,
-                  { left: `${tickFraction * 100}%` as `${number}%` },
-                ]}
-              >
-                {h}
-              </Text>
-            );
-          })}
-        </View>
       </View>
     </View>
   );
@@ -272,46 +248,36 @@ const styles = StyleSheet.create({
 
   // Track + ticks share one touch area
   sliderArea: {
-    marginTop: 18,
-    paddingBottom: 2, // ticks sit just below track
+    marginTop: 36,
+    paddingBottom: 2,
   },
   track: {
-    height: 4,
-    backgroundColor: '#F0EDE9',
-    borderRadius: 2,
+    height: 18,
+    backgroundColor: '#ECE8E2',
+    borderRadius: 9,
     overflow: 'visible',
-  },
-  fill: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    borderRadius: 2,
-    backgroundColor: '#F5A623',
   },
   thumb: {
     position: 'absolute',
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: '#F5A623',
-    borderWidth: 2.5,
-    borderColor: '#fff',
-    top: -6,
-    marginLeft: -8,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#1C1B19',
+    top: -2,
+    marginLeft: -11,
     ...Platform.select({
       ios: {
-        shadowColor: '#F5A623',
+        shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.45,
+        shadowOpacity: 0.25,
         shadowRadius: 4,
       },
-      android: { elevation: 3 },
+      android: { elevation: 4 },
     }),
   },
   thumbTooltip: {
     position: 'absolute',
-    bottom: 12,
+    bottom: 28,
     width: TOOLTIP_WIDTH,
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -326,23 +292,5 @@ const styles = StyleSheet.create({
   },
   thumbActive: {
     transform: [{ scale: 1.15 }],
-  },
-  ticks: {
-    position: 'relative',
-    height: 14,
-    marginTop: 7,
-  },
-  tick: {
-    position: 'absolute',
-    fontSize: 9,
-    color: '#D8D4CF',
-    fontWeight: '500',
-    width: 20,
-    marginLeft: -10,
-    textAlign: 'center',
-  },
-  tickActive: {
-    color: '#F5A623',
-    fontWeight: '700',
   },
 });

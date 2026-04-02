@@ -1,6 +1,8 @@
 import * as Location from 'expo-location';
+import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   Dimensions,
   Platform,
@@ -10,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAuth } from '../context/auth-context';
 
 interface OnboardingProps {
   onComplete: () => void;
@@ -131,6 +134,7 @@ function WelcomeScreen({ onNext }: { onNext: () => void }) {
         <View style={s.dots}>
           <View style={[s.dot, s.dotActive]} />
           <View style={s.dot} />
+          <View style={s.dot} />
         </View>
 
         {/* CTA */}
@@ -192,6 +196,7 @@ function LocationScreen({ onComplete }: { onComplete: () => void }) {
         <View style={s.dots}>
           <View style={s.dot} />
           <View style={[s.dot, s.dotActive]} />
+          <View style={s.dot} />
         </View>
 
         <TouchableOpacity style={s.btnPrimary} onPress={handleAllow} activeOpacity={0.85}>
@@ -209,6 +214,82 @@ function LocationScreen({ onComplete }: { onComplete: () => void }) {
   );
 }
 
+// ─── Screen 3: Sign up ───────────────────────────────────────────────────
+
+function SignUpScreen({ onComplete }: { onComplete: () => void }) {
+  const insets = useSafeAreaInsets();
+  const { signInWithGoogle, signInWithApple } = useAuth();
+  const [loading, setLoading] = useState<'google' | 'apple' | null>(null);
+  const ringAnims = usePulseAnims(3, 1.05, 500);
+
+  const wrap = async (provider: 'google' | 'apple', fn: () => Promise<void>) => {
+    setLoading(provider);
+    try { await fn(); } catch { /* dismissed / cancelled */ }
+    setLoading(null);
+    onComplete();
+  };
+
+  return (
+    <View style={[s.screen, { paddingTop: insets.top + 8 }]}>
+      <View style={s.illustArea}>
+        <View style={s.signupRingsWrap}>
+          {[200, 148, 96].map((size, i) => (
+            <Animated.View
+              key={size}
+              style={[s.signupRing, { width: size, height: size, borderRadius: size / 2, transform: [{ scale: ringAnims[i] }] }]}
+            />
+          ))}
+          <View style={s.signupCenter}>
+            <Text style={s.signupEmoji}>☀️</Text>
+          </View>
+        </View>
+      </View>
+
+      <View style={[s.bottomContent, { paddingBottom: Math.max(insets.bottom + 16, 52) }]}>
+        <Text style={s.permTitle}>
+          {'Save your\n'}
+          <Text style={s.permTitleItalic}>sunny spots</Text>
+        </Text>
+        <Text style={s.permDesc}>
+          Create a free account to save your favourite cafés and access them across devices.
+        </Text>
+
+        <View style={s.dots}>
+          <View style={s.dot} />
+          <View style={s.dot} />
+          <View style={[s.dot, s.dotActive]} />
+        </View>
+
+        <TouchableOpacity
+          style={[s.authBtn, loading && loading !== 'google' && s.authBtnDimmed]}
+          onPress={() => wrap('google', signInWithGoogle)}
+          activeOpacity={0.85}
+          disabled={!!loading}
+        >
+          {loading === 'google'
+            ? <ActivityIndicator color="#1C1B19" />
+            : (<><Ionicons name="logo-google" size={18} color="#333" style={s.authBtnIcon} /><Text style={s.authBtnText}>Continue with Google</Text></>)}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[s.authBtn, loading && loading !== 'apple' && s.authBtnDimmed]}
+          onPress={() => wrap('apple', signInWithApple)}
+          activeOpacity={0.85}
+          disabled={!!loading}
+        >
+          {loading === 'apple'
+            ? <ActivityIndicator color="#1C1B19" />
+            : (<><Ionicons name="logo-apple" size={18} color="#333" style={s.authBtnIcon} /><Text style={s.authBtnText}>Continue with Apple</Text></>)}
+        </TouchableOpacity>
+
+        <TouchableOpacity style={s.skipBtn} onPress={onComplete} activeOpacity={0.75}>
+          <Text style={s.btnGhostText}>Skip for now</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
 // ─── Onboarding (exported) ────────────────────────────────────────────────
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -219,10 +300,8 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const exitFade = useRef(new Animated.Value(1)).current;
 
   const goNext = () => {
-    // Slide current screen out to the left
     Animated.timing(slideX, { toValue: -SCREEN_WIDTH, duration: 320, useNativeDriver: true }).start(() => {
-      setStep(1);
-      // Position screen 2 off-screen to the right, then slide in
+      setStep((s) => s + 1);
       slideX.setValue(SCREEN_WIDTH);
       Animated.timing(slideX, { toValue: 0, duration: 320, useNativeDriver: true }).start();
     });
@@ -237,9 +316,9 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   return (
     <Animated.View style={[StyleSheet.absoluteFill, { opacity: exitFade, backgroundColor: '#F5F3F0' }]}>
       <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ translateX: slideX }] }]}>
-        {step === 0
-          ? <WelcomeScreen onNext={goNext} />
-          : <LocationScreen onComplete={handleComplete} />}
+        {step === 0 && <WelcomeScreen onNext={goNext} />}
+        {step === 1 && <LocationScreen onComplete={goNext} />}
+        {step === 2 && <SignUpScreen onComplete={handleComplete} />}
       </Animated.View>
     </Animated.View>
   );
@@ -363,6 +442,39 @@ const s = StyleSheet.create({
   },
   locPin: {
     fontSize: 22,
+  },
+
+  // Sign-up illustration (screen 3)
+  signupRingsWrap: {
+    width: 200,
+    height: 200,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  signupRing: {
+    position: 'absolute',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.2)',
+  },
+  signupCenter: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#F5A623',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#F5A623',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.4,
+        shadowRadius: 20,
+      },
+      android: { elevation: 8 },
+    }),
+  },
+  signupEmoji: {
+    fontSize: 30,
   },
 
   // Bottom content shared
@@ -498,6 +610,44 @@ const s = StyleSheet.create({
     fontSize: 12,
     color: '#fff',
     fontWeight: '600',
+  },
+
+  // Auth provider buttons (Google / Apple / Email)
+  authBtn: {
+    width: '100%',
+    height: 52,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E8E4DF',
+    backgroundColor: '#fff',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+    ...Platform.select({
+      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 4 },
+      android: { elevation: 1 },
+    }),
+  },
+  authBtnDimmed: {
+    opacity: 0.4,
+  },
+  authBtnIcon: {
+    marginRight: 10,
+  },
+  authBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1C1B19',
+  },
+
+  // Skip link
+  skipBtn: {
+    width: '100%',
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
   },
 
   // Ghost button
