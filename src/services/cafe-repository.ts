@@ -1,16 +1,16 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import type { Cafe } from '../types';
+import type { Cafe, CafeOpeningHours, DayKey, DayHours } from '../types';
 import { supabase } from './supabase';
 
-const CAFE_STORAGE_KEY = 'cafes_cache_v1';
+const CAFE_STORAGE_KEY = 'cafes_cache_v2';
 
 type SupabaseCafeRow = {
   id: string;
   name: string;
   lat: number;
   lng: number;
-  opening_hours?: string | null;
+  opening_hours?: Record<string, { open: string; close: string }> | null;
   google_formatted_address?: string | null;
 };
 
@@ -19,20 +19,13 @@ type SupabaseSunWindowRow = {
   intervals: unknown;
 };
 
-type SupabaseCafeHourRow = {
-  cafe_id: string;
-  day: string;
-  open: string;
-  close: string;
-};
-
 type GeoPoint = {
   lat: number;
   lng: number;
 };
 
 type CafeCachePayload = {
-  version: 1;
+  version: 2;
   fetchedAt: number;
   cafes: Cafe[];
 };
@@ -63,48 +56,24 @@ function normalizeIntervals(input: unknown): { start: string; end: string }[] {
     .map((item) => ({ start: item.start, end: item.end }));
 }
 
-function dayToken(day: string): string | null {
-  switch ((day || '').toLowerCase()) {
-    case 'monday': return 'Mo';
-    case 'tuesday': return 'Tu';
-    case 'wednesday': return 'We';
-    case 'thursday': return 'Th';
-    case 'friday': return 'Fr';
-    case 'saturday': return 'Sa';
-    case 'sunday': return 'Su';
-    default: return null;
+const VALID_DAY_KEYS = new Set<string>(['mo', 'tu', 'we', 'th', 'fr', 'sa', 'su']);
+
+function normalizeOpeningHours(
+  raw: Record<string, { open: string; close: string }> | null | undefined,
+): CafeOpeningHours | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const out: CafeOpeningHours = {};
+  for (const [key, val] of Object.entries(raw)) {
+    if (!VALID_DAY_KEYS.has(key)) continue;
+    if (typeof val?.open !== 'string' || typeof val?.close !== 'string') continue;
+    out[key as DayKey] = val as DayHours;
   }
-}
-
-function openingHoursByCafeId(rows: SupabaseCafeHourRow[]): Map<string, string> {
-  const byCafe = new Map<string, Partial<Record<'Mo' | 'Tu' | 'We' | 'Th' | 'Fr' | 'Sa' | 'Su', string>>>();
-
-  for (const row of rows) {
-    const token = dayToken(row.day);
-    if (!token) continue;
-    if (typeof row.open !== 'string' || typeof row.close !== 'string') continue;
-    const current = byCafe.get(row.cafe_id) ?? {};
-    current[token as 'Mo' | 'Tu' | 'We' | 'Th' | 'Fr' | 'Sa' | 'Su'] = `${row.open}-${row.close}`;
-    byCafe.set(row.cafe_id, current);
-  }
-
-  const out = new Map<string, string>();
-  const order: ('Mo' | 'Tu' | 'We' | 'Th' | 'Fr' | 'Sa' | 'Su')[] = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
-
-  for (const [cafeId, schedule] of byCafe.entries()) {
-    const rules = order
-      .filter((d) => typeof schedule[d] === 'string')
-      .map((d) => `${d} ${schedule[d]}`);
-    if (rules.length) out.set(cafeId, rules.join('; '));
-  }
-
-  return out;
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function rowToCafe(
   row: SupabaseCafeRow,
   sunWindowsByCafeId: Map<string, { start: string; end: string }[]>,
-  openingHoursMap: Map<string, string>,
 ): Cafe {
   const sunWindows = sunWindowsByCafeId.get(row.id) ?? [];
   return {
@@ -114,7 +83,7 @@ function rowToCafe(
     lng: row.lng,
     googleFormattedAddress: row.google_formatted_address,
     metadata: {
-      openingHours: row.opening_hours ?? openingHoursMap.get(row.id),
+      openingHours: normalizeOpeningHours(row.opening_hours),
       sunWindows,
     },
   };
@@ -123,46 +92,27 @@ function rowToCafe(
 export async function fetchCafesFromSupabase(): Promise<Cafe[]> {
   const today = copenhagenTodayDateString();
   const [cafesRes, sunRes] = await Promise.all([
-    (async () => {
-      const primary = await supabase
-        .from('cafes')
-        .select('id, name, lat, lng, opening_hours, google_formatted_address');
-      if (!primary.error) return primary;
-      if (primary.error.code !== '42703') return primary;
-      // Fallback for schemas that do not have opening_hours.
-      return supabase
-        .from('cafes')
-        .select('id, name, lat, lng, google_formatted_address');
-    })(),
-    supabase
-      .from('sun_windows')
-      .select('cafe_id, intervals')
-      .eq('date', today),
+    supabase.from('cafes').select('id, name, lat, lng, opening_hours, google_formatted_address'),
+    supabase.from('sun_windows').select('cafe_id, intervals').eq('date', today),
   ]);
-  const hoursRes = await supabase
-    .from('cafe_hours')
-    .select('cafe_id, day, open, close');
 
   if (cafesRes.error) throw new Error(cafesRes.error.message);
 
   const sunRows = sunRes.error ? [] : ((sunRes.data ?? []) as SupabaseSunWindowRow[]);
-  const hourRows = hoursRes.error ? [] : ((hoursRes.data ?? []) as SupabaseCafeHourRow[]);
 
   const sunWindowsByCafeId = new Map<string, { start: string; end: string }[]>();
   for (const row of sunRows) {
     sunWindowsByCafeId.set(row.cafe_id, normalizeIntervals(row.intervals));
   }
 
-  const hoursMap = openingHoursByCafeId(hourRows);
-
   return ((cafesRes.data ?? []) as SupabaseCafeRow[]).map((row) =>
-    rowToCafe(row, sunWindowsByCafeId, hoursMap),
+    rowToCafe(row, sunWindowsByCafeId),
   );
 }
 
 export async function saveCachedCafes(cafes: Cafe[]): Promise<void> {
   const payload: CafeCachePayload = {
-    version: 1,
+    version: 2,
     fetchedAt: Date.now(),
     cafes,
   };
@@ -174,7 +124,7 @@ export async function loadCachedCafes(): Promise<Cafe[] | null> {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as Partial<CafeCachePayload>;
-    if (parsed.version !== 1 || !Array.isArray(parsed.cafes)) return null;
+    if (parsed.version !== 2 || !Array.isArray(parsed.cafes)) return null;
     return parsed.cafes;
   } catch {
     return null;

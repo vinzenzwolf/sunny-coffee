@@ -46,11 +46,17 @@ function nowMinutesInCopenhagen(now = new Date()): number {
   return hour * 60 + minute;
 }
 
-function todayOpenLabel(cafe: Cafe): string {
-  const open = getOpenUntilToday(cafe.metadata?.openingHours);
-  if (open.isOpen && open.closesAt) return `Open until ${open.closesAt}`;
-  if (open.isOpen) return 'Open now';
-  return 'Closed now';
+function todayOpenStatus(cafe: Cafe): { label: string; color: string } {
+  const result = getOpenUntilToday(cafe.metadata?.openingHours);
+  if (result.isOpen) {
+    return {
+      label: result.closesAt ? `Open until ${result.closesAt}` : 'Open now',
+      color: '#4A9B6F',
+    };
+  }
+  if (result.reason === 'closed_today') return { label: 'Closed today', color: '#A39D95' };
+  if (result.reason === 'no_data') return { label: 'No opening hours', color: '#C8C4BF' };
+  return { label: 'Closed now', color: '#A39D95' };
 }
 
 // Estimated width of a "HH:MM–HH:MM" label as % of chart width.
@@ -201,6 +207,7 @@ export default function SavedTab({ topInset, bottomInset, onBrowse, onSelectCafe
           {savedCafes.map((cafe) => {
             const intervals = cafe.metadata?.sunWindows ?? [];
             const { segments, labels } = chartData(intervals);
+            const openStatus = todayOpenStatus(cafe);
             return (
               <View key={cafe.id} style={styles.card}>
                 <View style={styles.cardHeader}>
@@ -212,7 +219,7 @@ export default function SavedTab({ topInset, bottomInset, onBrowse, onSelectCafe
                     >
                       <Text style={styles.cardName} numberOfLines={1}>{cafe.name}</Text>
                     </TouchableOpacity>
-                    <Text style={styles.cardOpen}>{todayOpenLabel(cafe)}</Text>
+                    <Text style={[styles.cardOpen, { color: openStatus.color }]}>{openStatus.label}</Text>
                   </View>
                   <View style={styles.cardActions}>
                     <TouchableOpacity
@@ -333,7 +340,6 @@ const styles = StyleSheet.create({
   cardOpen: {
     marginTop: 2,
     fontSize: 12,
-    color: '#7B766E',
     fontWeight: '500',
   },
   heartBtn: {

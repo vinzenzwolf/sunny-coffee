@@ -98,8 +98,12 @@ export interface ToastMessage {
 // Cafes
 // ---------------------------------------------------------------------------
 
+export type DayKey = 'mo' | 'tu' | 'we' | 'th' | 'fr' | 'sa' | 'su';
+export type DayHours = { open: string; close: string };
+export type CafeOpeningHours = Partial<Record<DayKey, DayHours>>;
+
 export interface CafeMetadata {
-  openingHours?: string;
+  openingHours?: CafeOpeningHours;
   sunWindows?: { start: string; end: string }[];
   distanceMeters?: number;
   distanceKm?: number;
