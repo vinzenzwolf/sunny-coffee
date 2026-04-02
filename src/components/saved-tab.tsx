@@ -53,14 +53,18 @@ function todayOpenLabel(cafe: Cafe): string {
   return 'Closed now';
 }
 
+// Estimated width of a "HH:MM–HH:MM" label as % of chart width.
+// Card inner width ≈ 330px; "10:30–13:00" (11 chars × ~5.5px) ≈ 60px → ~18%.
+const LABEL_WIDTH_PCT = 19;
+
 type ChartData = {
   segments: { left: `${number}%`; width: `${number}%` }[];
-  labels: { label: string; left: `${number}%`; width: `${number}%` }[];
+  labels: { text: string; left: `${number}%` }[];
 };
 
 function chartData(intervals: SunInterval[]): ChartData {
   const segments: ChartData['segments'] = [];
-  const labels: SegmentLabel[] = [];
+  const candidates: { centerPct: number; text: string }[] = [];
 
   for (const it of intervals) {
     const start = parseHHmm(it.start);
@@ -72,7 +76,20 @@ function chartData(intervals: SunInterval[]): ChartData {
     const leftPct = ((clippedStart - CHART_START) / CHART_RANGE) * 100;
     const widthPct = ((clippedEnd - clippedStart) / CHART_RANGE) * 100;
     segments.push({ left: `${leftPct}%`, width: `${widthPct}%` });
-    labels.push({ label: `${it.start}–${it.end}`, left: `${leftPct}%`, width: `${widthPct}%` });
+    candidates.push({ centerPct: leftPct + widthPct / 2, text: `${it.start}–${it.end}` });
+  }
+
+  // Greedy non-overlapping label selection: skip a label if it would
+  // overlap the previous one (after clamping to chart bounds).
+  const labels: ChartData['labels'] = [];
+  let lastRightEdge = -Infinity;
+  for (const c of candidates) {
+    const rawLeft = c.centerPct - LABEL_WIDTH_PCT / 2;
+    const left = Math.max(0, Math.min(100 - LABEL_WIDTH_PCT, rawLeft));
+    if (left >= lastRightEdge - 1) {
+      labels.push({ text: c.text, left: `${left}%` });
+      lastRightEdge = left + LABEL_WIDTH_PCT;
+    }
   }
 
   return { segments, labels };
@@ -120,7 +137,6 @@ export default function SavedTab({ topInset, bottomInset, onBrowse, onSelectCafe
   const { savedIds, toggle } = useSavedCafes();
 
   const savedCafes = cafes.filter((c) => savedIds.has(c.id));
-  const sunCount = savedCafes.filter((c) => c.metadata?.inSunNow).length;
   const nowMarkerPct: `${number}%` = (() => {
     const now = nowMinutesInCopenhagen();
     const clamped = Math.max(CHART_START, Math.min(CHART_END, now));
@@ -178,11 +194,7 @@ export default function SavedTab({ topInset, bottomInset, onBrowse, onSelectCafe
       >
         <View style={styles.header}> 
           <Text style={styles.title}>Your <Text style={styles.titleItalic}>favorites</Text></Text>
-          <Text style={styles.subtitle}> 
-            {sunCount > 0
-              ? <><Text style={styles.subtitleBold}>{sunCount} in the sun</Text> right now</>
-              : `${savedCafes.length} saved`}
-          </Text>
+          <Text style={styles.subtitle}>{savedCafes.length} saved</Text>
         </View>
 
         <View style={styles.list}> 
@@ -238,10 +250,10 @@ export default function SavedTab({ topInset, bottomInset, onBrowse, onSelectCafe
                       {labels.map((lbl, idx) => (
                         <Text
                           key={`${cafe.id}-lbl-${idx}`}
-                          style={[styles.chartWindowLabel, { left: lbl.left, width: lbl.width }]}
+                          style={[styles.chartWindowLabel, { left: lbl.left, width: `${LABEL_WIDTH_PCT}%` }]}
                           numberOfLines={1}
                         >
-                          {lbl.label}
+                          {lbl.text}
                         </Text>
                       ))}
                     </View>
@@ -287,11 +299,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#B8B4AF',
   },
-  subtitleBold: {
-    fontWeight: '600',
-    color: '#1C1B19',
-  },
-
   list: {
     paddingHorizontal: 16,
     gap: 12,
