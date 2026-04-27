@@ -2,9 +2,10 @@
   "expo": {
     "name": "sunny-coffee",
     "slug": "sunny-coffee",
+    "displayName": "Sunny Coffee",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": null,
+    "icon": "./assets/icon.png",
     "scheme": "sunnycoffee",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -12,12 +13,17 @@
       "supportsTablet": true,
       "bundleIdentifier": "ch.vinzenzwolf.sunnycoffee",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Sunny Coffee uses your location to show nearby cafés and calculate sun exposure from where you are."
+        "NSLocationWhenInUseUsageDescription": "Sunny Coffee uses your location to show nearby cafés and calculate sun exposure from where you are.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
     },
     "plugins": [
       "expo-router",
@@ -26,11 +32,18 @@
         {
           "locationWhenInUsePermission": "Sunny Coffee uses your location to show nearby cafés and calculate sun exposure from where you are."
         }
-      ]
+      ],
+      "expo-apple-authentication"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "4c61e08b-fc8b-4196-8aa1-250281871679"
+      }
     }
   }
 }

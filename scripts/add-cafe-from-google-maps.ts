@@ -2,7 +2,7 @@
  * Add or update one cafe from a Google Place ID.
  *
  * Usage:
- *   npx tsx scripts/add-cafe-from-google-maps.ts "<PLACE_ID>"
+ *   npx tsx scripts/add-cafe-from-google-maps.ts "<PLACE_ID>" 
  *   npx tsx scripts/add-cafe-from-google-maps.ts "places/<PLACE_ID>"
  *
  * Required env vars:

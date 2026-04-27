@@ -1,9 +1,6 @@
 TODO LIST:
 
-- [ ] make coffees clickable
-- [ ] add our recommandations
-- [ ] remove if coffee is in sun or not (counter on top)
-- [ ] make it only usable in copenhagen for now
-- [ ] make the sun windows prettier
-- [ ] check where opening hours are coming from
-- [ ] three times cache clearence -> load all data new (refetch!)
+- [ ] check bugs in build version (coffee icon, slider)
+- [ ] add apple login option (go live with google login and apple login)
+- [ ] check if sunwindow matches visually
+- [ ] check what to do to get this into app store :)

@@ -49,30 +49,6 @@ export interface SunPosition {
 }
 
 // ---------------------------------------------------------------------------
-// Shadows
-// ---------------------------------------------------------------------------
-
-/**
- * Which rendering backend to use.
- *
- * 'client'  – shadows are computed locally from OSM building geometry
- *             (free, works offline once buildings are loaded).
- * 'api'     – ShadeMap raster tiles are fetched and overlaid as an image layer
- *             (requires EXPO_PUBLIC_SHADEMAP_API_KEY).
- */
-export type ShadowMode = 'client' | 'api';
-
-export interface ShadowResult {
-  mode: ShadowMode;
-  /** Populated when mode === 'client' */
-  shadowPolygons?: FeatureCollection<Polygon>;
-  /** Tile URL template populated when mode === 'api' */
-  tileUrlTemplate?: string;
-  /** Unix timestamp of the shadow calculation */
-  computedAt: number;
-}
-
-// ---------------------------------------------------------------------------
 // Map camera / region
 // ---------------------------------------------------------------------------
 

@@ -1,4 +1,5 @@
 import * as Location from 'expo-location';
+import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useState } from 'react';
 import {
@@ -12,6 +13,10 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+
+const PRIVACY_URL = 'https://vinzenzwolf.github.io/sunny-coffee/';
+const TERMS_URL   = 'https://vinzenzwolf.github.io/sunny-coffee/';
+const FEEDBACK_EMAIL = 'vinzenzwolf1@gmail.com';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/auth-context';
 import { useLocationSettings } from '../context/location-settings-context';
@@ -164,9 +169,15 @@ function ProfileLoggedIn({ topInset, bottomInset, onAboutLogoPress }: Props & { 
           </TouchableOpacity>
           <Text style={styles.aboutVersion}>Version 1.0.0 · Made in Copenhagen</Text>
           <View style={styles.aboutLinks}>
-            <Text style={styles.aboutLink}>Privacy</Text>
-            <Text style={styles.aboutLink}>Terms</Text>
-            <Text style={styles.aboutLink}>Feedback</Text>
+            <TouchableOpacity onPress={() => void Linking.openURL(PRIVACY_URL)} activeOpacity={0.7}>
+              <Text style={styles.aboutLink}>Privacy</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => void Linking.openURL(TERMS_URL)} activeOpacity={0.7}>
+              <Text style={styles.aboutLink}>Terms</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => void Linking.openURL(`mailto:${FEEDBACK_EMAIL}`)} activeOpacity={0.7}>
+              <Text style={styles.aboutLink}>Feedback</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </ScrollView>
@@ -244,9 +255,11 @@ function ProfileLogin({ topInset, bottomInset, onAboutLogoPress }: Props & { onA
         )}
       </TouchableOpacity>
 
-      <Text style={styles.legalText}>
-        By continuing you agree to our Terms of Service and Privacy Policy.
-      </Text>
+      <TouchableOpacity onPress={() => void Linking.openURL(PRIVACY_URL)} activeOpacity={0.7}>
+        <Text style={styles.legalText}>
+          By continuing you agree to our Terms of Service and Privacy Policy.
+        </Text>
+      </TouchableOpacity>
 
       {/* About */}
       <Text style={styles.sectionLabel}>About</Text>

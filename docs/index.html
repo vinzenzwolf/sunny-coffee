@@ -24,7 +24,7 @@
 <body>
 
   <h1>Privacy Policy</h1>
-  <p class="meta">Sunny Coffee &nbsp;·&nbsp; Last updated: April 7, 2026</p>
+  <p class="meta">Sunny Coffee &nbsp;·&nbsp; Last updated: April 24, 2026</p>
 
   <p>
     Sunny Coffee ("the app") is a map application that helps you find sun-exposed
@@ -33,36 +33,67 @@
   </p>
 
   <h2>1. Data We Collect</h2>
-  <p>The app requests access to your device's location for the following purpose:</p>
+
+  <p><strong>Location</strong></p>
+  <p>The app requests access to your device's location to:</p>
   <ul>
-    <li>Showing your current position on the map</li>
-    <li>Calculating distances to nearby cafés</li>
-    <li>Centering the map near you when you open the app</li>
+    <li>Show your current position on the map</li>
+    <li>Calculate distances to nearby cafés</li>
+    <li>Center the map near you when the app opens</li>
   </ul>
   <p>
-    Location data is used exclusively on your device in real time.
-    It is never stored, transmitted to our servers, or shared with any third party.
+    Location data is processed on your device in real time and is never stored on our servers
+    or shared with third parties.
+  </p>
+
+  <p><strong>Account information</strong></p>
+  <p>
+    You may optionally create an account using Sign in with Apple or Sign in with Google.
+    When you do, the app receives and stores:
+  </p>
+  <ul>
+    <li>Your name (if provided by Apple or Google)</li>
+    <li>Your email address</li>
+  </ul>
+  <p>
+    This information is stored securely on Supabase (our backend provider) and is used solely
+    to identify your account and sync your saved cafés across devices.
+  </p>
+
+  <p><strong>Saved cafés</strong></p>
+  <p>
+    If you are signed in, cafés you save are stored in your account on Supabase so they
+    are available across devices. If you use the app without an account, saved cafés
+    are stored only on your device.
   </p>
 
   <h2>2. Data We Do Not Collect</h2>
-  <p>Sunny Coffee does not collect, store, or transmit:</p>
+  <p>Sunny Coffee does not collect:</p>
   <ul>
-    <li>Your name, email address, or any account information</li>
     <li>Device identifiers or advertising IDs</li>
     <li>Usage analytics or crash reports</li>
-    <li>Any personal information of any kind</li>
+    <li>Payment or financial information</li>
   </ul>
 
   <h2>3. Third-Party Services</h2>
-  <p>The app loads map tiles and building data from the following external services:</p>
+  <p>The app uses the following external services:</p>
   <ul>
     <li>
-      <strong>OpenFreeMap</strong> — provides the base map vector tiles.
-      Tile requests contain only the map viewport bounding box, not your location.
+      <strong>Supabase</strong> — our backend database, used to store your account and saved
+      cafés. Supabase is GDPR-compliant. See
+      <a href="https://supabase.com/privacy">supabase.com/privacy</a>.
     </li>
     <li>
-      <strong>OpenStreetMap / Overpass API</strong> — café and building data is fetched
-      from the public Overpass API. Requests contain only the map viewport bounding box,
+      <strong>Google Sign-In / Apple Sign-In</strong> — used for authentication only.
+      We receive only your name and email from these providers.
+    </li>
+    <li>
+      <strong>OpenFreeMap</strong> — provides base map vector tiles. Tile requests contain
+      only the map viewport bounding box, not your location.
+    </li>
+    <li>
+      <strong>OpenStreetMap / Overpass API</strong> — café and building data fetched from
+      the public Overpass API. Requests contain only the map viewport bounding box,
       not your location.
     </li>
   </ul>
@@ -70,35 +101,45 @@
   <h2>4. Location Permission</h2>
   <p>
     The app requests "When In Use" location permission only. You can deny or revoke
-    this permission at any time in your iPhone's Settings → Privacy & Security →
-    Location Services → Sunny Coffee. The app remains usable without location access;
-    the map will simply default to central Copenhagen.
+    this permission at any time in Settings → Privacy & Security → Location Services →
+    Sunny Coffee. The app remains usable without location access; the map defaults to
+    central Copenhagen.
   </p>
 
   <h2>5. Data Retention</h2>
   <p>
-    Café data fetched from OpenStreetMap is cached locally on your device
-    (in the app's private storage) to reduce network requests. This cache contains
-    only public café information from OpenStreetMap — no personal data — and can be
-    cleared by deleting and reinstalling the app.
+    If you have an account, your data is retained until you delete your account.
+    To request account deletion and removal of all associated data, contact us at the
+    email address below.
+  </p>
+  <p>
+    Café data fetched from OpenStreetMap is cached locally on your device to reduce
+    network requests. This cache contains only public OpenStreetMap data — no personal
+    information — and is cleared when you delete the app.
   </p>
 
   <h2>6. Children's Privacy</h2>
   <p>
-    The app does not knowingly collect any information from children under 13.
-    It contains no account creation, in-app purchases, or social features.
+    The app does not knowingly collect personal information from children under 13.
+    It contains no in-app purchases or social features.
   </p>
 
-  <h2>7. Changes to This Policy</h2>
+  <h2>7. Your Rights</h2>
+  <p>
+    You may request access to, correction of, or deletion of your personal data at any
+    time by contacting us. We will respond within 30 days.
+  </p>
+
+  <h2>8. Changes to This Policy</h2>
   <p>
     If this policy changes materially, the updated version will be posted at this URL
     with a revised "Last updated" date.
   </p>
 
-  <h2>8. Contact</h2>
+  <h2>9. Contact</h2>
   <p>
-    Questions or concerns about privacy can be sent to:<br />
-    <a href="mailto:v.wolf11@gmail.com">v.wolf11@gmail.com</a>
+    Questions or concerns about privacy:<br />
+    <a href="mailto:vinzenzwolf1@gmail.com">vinzenzwolf1@gmail.com</a>
   </p>
 
 </body>

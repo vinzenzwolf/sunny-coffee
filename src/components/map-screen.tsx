@@ -835,9 +835,8 @@ export default function MapScreen() {
       case 'MAP_READY': {
         setMapReady(true);
         setIsLoading(false);
-        const apiKey = process.env['EXPO_PUBLIC_SHADEMAP_API_KEY'] ?? '';
         webviewRef.current?.injectJavaScript(
-          buildPostMessage({ type: 'INIT', apiKey }),
+          buildPostMessage({ type: 'INIT' }),
         );
         break;
       }
@@ -876,7 +875,7 @@ export default function MapScreen() {
         pushToast('error', msg.message);
         break;
     }
-  }, [updateSunStatus]);
+  }, [cafes, updateSunStatus]);
 
   // ─── RN → WebView ─────────────────────────────────────────────────────
 

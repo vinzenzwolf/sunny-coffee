@@ -23,11 +23,9 @@ export default function RootLayout() {
   const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
 
   useEffect(() => {
-    // TODO: remove for production — always show onboarding for testing
-    setOnboardingDone(false);
-    // AsyncStorage.getItem(ONBOARDING_KEY).then((val: string | null) => {
-    //   setOnboardingDone(val === 'true');
-    // });
+    AsyncStorage.getItem(ONBOARDING_KEY).then((val: string | null) => {
+      setOnboardingDone(val === 'true');
+    });
   }, []);
 
   const handleOnboardingComplete = async () => {
