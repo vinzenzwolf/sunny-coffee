@@ -10,7 +10,7 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "ch.vinzenzwolf.sunnycoffee",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Sunny Coffee uses your location to show nearby cafés and calculate sun exposure from where you are.",
