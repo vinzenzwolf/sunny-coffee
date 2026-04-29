@@ -1,8 +1,7 @@
 {
   "expo": {
-    "name": "sunny-coffee",
+    "name": "sunny coffee",
     "slug": "sunny-coffee",
-    "displayName": "Sunny Coffee",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",

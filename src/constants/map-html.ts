@@ -822,6 +822,7 @@ export const MAP_HTML = `<!DOCTYPE html>
     maxPitch:   0,
     maxZoom:    18,
     minZoom:    14,
+    maxBounds:  [[12.20, 55.55], [12.85, 55.80]],
     attributionControl: false,
   });
 

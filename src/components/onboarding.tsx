@@ -200,14 +200,10 @@ function LocationScreen({ onComplete }: { onComplete: () => void }) {
         </View>
 
         <TouchableOpacity style={s.btnPrimary} onPress={handleAllow} activeOpacity={0.85}>
-          <Text style={s.btnPrimaryText}>Allow location</Text>
+          <Text style={s.btnPrimaryText}>Continue</Text>
           <View style={s.btnArrow}>
             <Text style={s.btnArrowText}>→</Text>
           </View>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={s.btnGhost} onPress={onComplete} activeOpacity={0.75}>
-          <Text style={s.btnGhostText}>Not now</Text>
         </TouchableOpacity>
       </View>
     </View>

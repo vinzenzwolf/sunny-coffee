@@ -27,7 +27,6 @@
 import * as Location from 'expo-location';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
   Animated,
   Keyboard,
   Linking,
@@ -209,36 +208,11 @@ function HeartButton({ cafeId }: { cafeId: string }) {
   );
 }
 
-function DirectionsButton({ cafeId, lat, lng }: { cafeId: string; lat: number; lng: number }) {
-  const handlePress = async () => {
-    const apiKey = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY;
-
-    if (apiKey && cafeId) {
-      try {
-        const res = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(cafeId)}`, {
-          headers: {
-            'X-Goog-Api-Key': apiKey,
-            'X-Goog-FieldMask': 'googleMapsUri',
-          },
-        });
-        if (res.ok) {
-          const data = (await res.json()) as { googleMapsUri?: string };
-          if (data.googleMapsUri) {
-            await Linking.openURL(data.googleMapsUri);
-            return;
-          }
-        }
-      } catch {
-        // Fallback below.
-      }
-    }
-
-    if (cafeId) {
-      await Linking.openURL(`https://www.google.com/maps/place/?q=place_id:${encodeURIComponent(cafeId)}`);
-      return;
-    }
-    await Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`);
-  };
+function DirectionsButton({ cafeId, cafeName, lat, lng }: { cafeId: string; cafeName: string; lat: number; lng: number }) {
+  const handlePress = () =>
+    Linking.openURL(
+      `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cafeName)}&query_place_id=${encodeURIComponent(cafeId)}`,
+    );
   return (
     <TouchableOpacity style={vcStyles.arrow} onPress={handlePress} activeOpacity={0.8}>
       <Ionicons name="navigate-outline" size={17} color="#fff" />
@@ -303,7 +277,7 @@ function VenueCard({
           )}
         </View>
         <View style={vcStyles.buttonRow}>
-          <DirectionsButton cafeId={cafe.id} lat={cafe.lat} lng={cafe.lng} />
+          <DirectionsButton cafeId={cafe.id} cafeName={cafe.name} lat={cafe.lat} lng={cafe.lng} />
           <HeartButton cafeId={cafe.id} />
         </View>
       </View>
@@ -741,17 +715,14 @@ export default function MapScreen() {
         webviewRef.current?.injectJavaScript(
           buildPostMessage({ type: 'SET_LOCATION', lat, lng }),
         );
+        const isOutside = kmFromCopenhagen(lat, lng) > CPH_RADIUS_KM;
         webviewRef.current?.injectJavaScript(
-          buildPostMessage({ type: 'FLY_TO', lat, lng }),
+          buildPostMessage({ type: 'FLY_TO', lat: isOutside ? CPH_LAT : lat, lng: isOutside ? CPH_LNG : lng }),
         );
         hasInitialCameraFocusRef.current = true;
-        if (!outsideAlertShownRef.current && kmFromCopenhagen(lat, lng) > CPH_RADIUS_KM) {
+        if (!outsideAlertShownRef.current && isOutside) {
           outsideAlertShownRef.current = true;
-          Alert.alert(
-            'Only available in Copenhagen',
-            'Sunny Coffee currently only works in Copenhagen. The map will still show Copenhagen.',
-            [{ text: 'Got it' }],
-          );
+          pushToast('warning', 'Sunny Coffee is only available in Copenhagen', true);
         }
       };
 
@@ -764,11 +735,7 @@ export default function MapScreen() {
         return;
       }
 
-      let { status } = await Location.getForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        const req = await Location.requestForegroundPermissionsAsync();
-        status = req.status;
-      }
+      const { status } = await Location.getForegroundPermissionsAsync();
       if (status !== 'granted') {
         focusCenter(DEFAULT_LAT, DEFAULT_LNG);
         return;
@@ -953,12 +920,14 @@ export default function MapScreen() {
 
   // ─── Toasts ───────────────────────────────────────────────────────────
 
-  function pushToast(level: ToastMessage['level'], message: string): void {
+  function pushToast(level: ToastMessage['level'], message: string, persistent = false): void {
     const id = uniqueId();
-    setToasts((prev) => [...prev.slice(-2), { id, message, level }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4_000);
+    setToasts((prev) => [...prev.slice(-2), { id, message, level, persistent }]);
+    if (!persistent) {
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, 4_000);
+    }
   }
 
   // ─── Layout values ────────────────────────────────────────────────────
@@ -1065,10 +1034,19 @@ export default function MapScreen() {
             <TouchableOpacity
               key={t.id}
               style={[styles.toast, t.level === 'error' ? styles.toastError : styles.toastWarning]}
-              onPress={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
-              activeOpacity={0.8}
+              onPress={t.persistent ? undefined : () => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
+              activeOpacity={t.persistent ? 1 : 0.8}
             >
-              <Text style={styles.toastText}>{t.message}</Text>
+              <Text style={[styles.toastText, t.persistent && styles.toastTextPersistent]}>{t.message}</Text>
+              {t.persistent && (
+                <TouchableOpacity
+                  style={styles.toastDismiss}
+                  onPress={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text style={styles.toastDismissText}>✕</Text>
+                </TouchableOpacity>
+              )}
             </TouchableOpacity>
           ))}
         </View>
@@ -1296,6 +1274,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -1320,5 +1300,24 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#1C1B19',
     lineHeight: 18,
+    flex: 1,
+  },
+  toastTextPersistent: {
+    marginRight: 8,
+  },
+  toastDismiss: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0,0,0,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  toastDismissText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#6B6560',
+    lineHeight: 20,
   },
 });

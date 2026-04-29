@@ -101,33 +101,10 @@ function chartData(intervals: SunInterval[]): ChartData {
   return { segments, labels };
 }
 
-async function openCafeInGoogleMaps(cafe: Cafe): Promise<void> {
-  const apiKey = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY;
-  if (apiKey && cafe.id) {
-    try {
-      const res = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(cafe.id)}`, {
-        headers: {
-          'X-Goog-Api-Key': apiKey,
-          'X-Goog-FieldMask': 'googleMapsUri',
-        },
-      });
-      if (res.ok) {
-        const data = (await res.json()) as { googleMapsUri?: string };
-        if (data.googleMapsUri) {
-          await Linking.openURL(data.googleMapsUri);
-          return;
-        }
-      }
-    } catch {
-      // Fallback below.
-    }
-  }
-
-  if (cafe.id) {
-    await Linking.openURL(`https://www.google.com/maps/place/?q=place_id:${encodeURIComponent(cafe.id)}`);
-    return;
-  }
-  await Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${cafe.lat},${cafe.lng}`);
+function openCafeInGoogleMaps(cafe: Cafe): Promise<void> {
+  return Linking.openURL(
+    `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cafe.name)}&query_place_id=${encodeURIComponent(cafe.id)}`,
+  );
 }
 
 type Props = {

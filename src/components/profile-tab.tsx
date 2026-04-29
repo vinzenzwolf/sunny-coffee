@@ -33,7 +33,7 @@ const CAFE_CACHE_STORAGE_KEY = 'cafes_cache_v1';
 // ---------------------------------------------------------------------------
 
 function ProfileLoggedIn({ topInset, bottomInset, onAboutLogoPress }: Props & { onAboutLogoPress: () => void }) {
-  const { user, signOut } = useAuth();
+  const { user, signOut, deleteAccount } = useAuth();
   const { useMyLocation, setUseMyLocation } = useLocationSettings();
   const [updatingLocationSetting, setUpdatingLocationSetting] = useState(false);
 
@@ -71,6 +71,24 @@ function ProfileLoggedIn({ topInset, bottomInset, onAboutLogoPress }: Props & { 
           style: 'destructive',
           onPress: () => {
             void signOut();
+          },
+        },
+      ],
+      { cancelable: true },
+    );
+  };
+
+  const handleDeleteAccountPress = () => {
+    Alert.alert(
+      'Delete account?',
+      'This will permanently delete your account and all saved cafés. This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete account',
+          style: 'destructive',
+          onPress: () => {
+            void deleteAccount();
           },
         },
       ],
@@ -155,6 +173,14 @@ function ProfileLoggedIn({ topInset, bottomInset, onAboutLogoPress }: Props & { 
             </View>
             <View style={styles.rowLabel}>
               <Text style={[styles.rowTitle, { color: '#C0392B' }]}>Sign out</Text>
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.row, styles.rowBorder]} onPress={handleDeleteAccountPress} activeOpacity={0.7}>
+            <View style={[styles.rowIcon, { backgroundColor: '#FFF0EE' }]}>
+              <Ionicons name="trash-outline" size={18} color="#C0392B" />
+            </View>
+            <View style={styles.rowLabel}>
+              <Text style={[styles.rowTitle, { color: '#C0392B' }]}>Delete account</Text>
             </View>
           </TouchableOpacity>
         </View>

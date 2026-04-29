@@ -68,6 +68,7 @@ export interface ToastMessage {
   id: string;
   message: string;
   level: ToastLevel;
+  persistent?: boolean;
 }
 
 // ---------------------------------------------------------------------------
