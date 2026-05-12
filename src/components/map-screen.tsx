@@ -803,7 +803,10 @@ export default function MapScreen() {
         setMapReady(true);
         setIsLoading(false);
         webviewRef.current?.injectJavaScript(
-          buildPostMessage({ type: 'INIT' }),
+          buildPostMessage({
+            type: 'INIT',
+            shadeMapApiKey: process.env.EXPO_PUBLIC_SHADEMAP_API_KEY ?? '',
+          }),
         );
         break;
       }
@@ -949,7 +952,7 @@ export default function MapScreen() {
       <WebView
         ref={webviewRef}
         style={styles.webview}
-        source={{ html: MAP_HTML, baseUrl: 'https://example.com' }}
+        source={{ html: MAP_HTML, baseUrl: 'http://localhost' }}
         originWhitelist={['*']}
         javaScriptEnabled
         domStorageEnabled
